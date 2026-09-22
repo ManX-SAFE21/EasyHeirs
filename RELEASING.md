@@ -79,7 +79,7 @@ git push origin vX.Y.Z
 
 `gh` CLI is not installed, so use the web UI:
 
-1. Go to <https://github.com/ManX-SAFE21/BALeasyHeirs/releases> → **Draft a
+1. Go to <https://github.com/ManX-SAFE21/EasyHeirs/releases> → **Draft a
    new release**.
 2. Choose the tag `vX.Y.Z`.
 3. Upload the five assets from the table above (the four `dist/` files plus
