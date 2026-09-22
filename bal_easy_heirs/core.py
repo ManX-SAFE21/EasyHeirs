@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-BAL Easy Heirs - SAFE21
+Easy Heirs - SAFE21
 core.py : logica pura, nessuna dipendenza da Qt.
 
 Modello dati (deciso al passo 1)

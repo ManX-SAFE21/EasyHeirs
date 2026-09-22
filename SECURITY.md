@@ -1,6 +1,6 @@
 # Security notes
 
-This document summarizes a security review of BAL Easy Heirs (code as of
+This document summarizes a security review of Easy Heirs (code as of
 v0.6.9), covering how it generates and stores beneficiary seeds, and where
 that material can leave the wallet file.
 

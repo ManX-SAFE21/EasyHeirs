@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-BAL Easy Heirs - SAFE21
+Easy Heirs - SAFE21
 qt.py : interfaccia grafica.
 
 Caricamento dei moduli fratelli
@@ -361,7 +361,7 @@ class CreateDialog(QDialog):
         QDialog.__init__(self, parent)
         self.wallet = wallet
         self.created = []
-        self.setWindowTitle(_("Aggiungi beneficiari") + " \u2014 BAL Easy Heirs")
+        self.setWindowTitle(_("Aggiungi beneficiari") + " \u2014 Easy Heirs")
         self.setMinimumSize(820, 560)
 
         self.existing = {r["name"].lower() for r in core.beneficiaries(wallet)}
@@ -657,7 +657,7 @@ class PrintDialog(QDialog):
         QDialog.__init__(self, parent)
         self.wallet = wallet
         self.rows = rows
-        self.setWindowTitle(_("Stampa documenti") + " \u2014 BAL Easy Heirs")
+        self.setWindowTitle(_("Stampa documenti") + " \u2014 Easy Heirs")
         self.setMinimumSize(820, 500)
 
         outer = QVBoxLayout(self)
@@ -847,7 +847,7 @@ class PrintDialog(QDialog):
 
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         _setup(printer)
-        printer.setDocName("BAL Easy Heirs")
+        printer.setDocName("Easy Heirs")
         # Preimpostiamo la stampa fronte/retro con giro sul LATO LUNGO: e' il
         # modo in cui la banda nera del retro finisce dietro le parole del
         # fronte. Cosi' la finestra di stampa si apre gia' su questa scelta;
@@ -1017,7 +1017,7 @@ class RemoveDialog(QDialog):
     def __init__(self, parent, wallet):
         QDialog.__init__(self, parent)
         self.wallet = wallet
-        self.setWindowTitle(_("Rimuovi i dati di BAL Easy Heirs"))
+        self.setWindowTitle(_("Rimuovi i dati di Easy Heirs"))
         self.setWindowIcon(_safe21_icon())
         self.setMinimumWidth(660)
         s = core.removal_summary(wallet)
@@ -1300,7 +1300,7 @@ class MainDialog(QDialog):
         self.plugin = plugin
         self.window = window
         self.wallet = window.wallet
-        self.setWindowTitle(_("BAL Easy Heirs") + " \u2014 SAFE21")
+        self.setWindowTitle(_("Easy Heirs") + " \u2014 SAFE21")
         self.setWindowIcon(_safe21_icon())
         self.setMinimumSize(940, 520)
 
@@ -1543,7 +1543,7 @@ class MainDialog(QDialog):
     def on_envelope(self):
         r = self._current()
         if not r or not r["generated"]:
-            QMessageBox.information(self, _("BAL Easy Heirs"), _(
+            QMessageBox.information(self, _("Easy Heirs"), _(
                 "Il numero di busta esiste solo per i beneficiari con seed "
                 "generato."))
             return
@@ -1581,7 +1581,7 @@ class MainDialog(QDialog):
         """
         r = row if isinstance(row, dict) else self._current()
         if not r:
-            QMessageBox.information(self, _("BAL Easy Heirs"), _(
+            QMessageBox.information(self, _("Easy Heirs"), _(
                 "Seleziona prima un beneficiario, poi Modifica quota."))
             return
 
@@ -1639,7 +1639,7 @@ class MainDialog(QDialog):
         """
         r = row if isinstance(row, dict) else self._current()
         if not r:
-            QMessageBox.information(self, _("BAL Easy Heirs"), _(
+            QMessageBox.information(self, _("Easy Heirs"), _(
                 "Seleziona prima un beneficiario nella lista, poi premi "
                 "Rimuovi."))
             return
@@ -1673,7 +1673,7 @@ class MainDialog(QDialog):
 
     def on_print(self):
         if not self.rows:
-            QMessageBox.information(self, _("BAL Easy Heirs"), _(
+            QMessageBox.information(self, _("Easy Heirs"), _(
                 "Non c'e' ancora nessun beneficiario."))
             return
         PrintDialog(self, self.wallet, self.rows).exec()
@@ -1688,7 +1688,7 @@ class MainDialog(QDialog):
         lista di BAL e non entrano mai nel file.
         """
         if not self.rows:
-            QMessageBox.information(self, _("BAL Easy Heirs"), _(
+            QMessageBox.information(self, _("Easy Heirs"), _(
                 "Non c'e' ancora nessun erede da esportare."))
             return
 
@@ -1716,7 +1716,7 @@ class MainDialog(QDialog):
             return
 
         self.status.setText(_("Lista eredi esportata: {}").format(path))
-        QMessageBox.information(self, _("BAL Easy Heirs"), _(
+        QMessageBox.information(self, _("Easy Heirs"), _(
             "{} eredi salvati in:\n{}\n\nPer usarli in BAL: apri BAL, tasto "
             "destro sulla lista eredi, scegli Import e seleziona questo "
             "file.").format(n, path))
@@ -1839,7 +1839,7 @@ class AfterCreateDialog(QDialog):
             _logger.error(f"lettura beneficiari per la stampa fallita: {e}")
             rows = []
         if not rows:
-            QMessageBox.information(self, _("BAL Easy Heirs"), _(
+            QMessageBox.information(self, _("Easy Heirs"), _(
                 "Non ci sono fogli da stampare per questi beneficiari."))
             return
         PrintDialog(self, self.wallet, rows).exec()
@@ -1931,7 +1931,7 @@ class Plugin(BasePlugin):
                 old.deleteLater()
             except Exception:
                 pass
-        tip = _("BAL Easy Heirs: beneficiari e stampe")
+        tip = _("Easy Heirs: beneficiari e stampe")
         # La finestra va cercata al momento del CLIC (vedi _resolve_window):
         # all'aggancio la barra potrebbe non essere ancora legata alla finestra.
         cb = lambda: self.open_main(self._resolve_window(sb))  # noqa: E731
@@ -2013,14 +2013,14 @@ class Plugin(BasePlugin):
 
     def open_main(self, window):
         if getattr(window, "wallet", None) is None:
-            QMessageBox.information(window, _("BAL Easy Heirs"),
+            QMessageBox.information(window, _("Easy Heirs"),
                                     _("Nessun wallet aperto."))
             return
         try:
             MainDialog(self, window).exec()
         except Exception as e:
             _logger.error(f"apertura finestra fallita: {e}")
-            QMessageBox.critical(window, _("BAL Easy Heirs"), str(e))
+            QMessageBox.critical(window, _("Easy Heirs"), str(e))
 
     def _resolve_window(self, widget):
         """Risale fino alla finestra di Electrum che possiede un wallet.
@@ -2060,4 +2060,4 @@ class Plugin(BasePlugin):
             RemoveDialog(window, window.wallet).exec()
         except Exception as e:
             _logger.error(f"apertura rimozione fallita: {e}")
-            QMessageBox.critical(window, _("BAL Easy Heirs"), str(e))
+            QMessageBox.critical(window, _("Easy Heirs"), str(e))

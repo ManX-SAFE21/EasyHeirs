@@ -2,7 +2,7 @@
 
 A free companion plugin for [Electrum Wallet](https://electrum.org) that helps you prepare the heir list for **BAL — Bitcoin After Life**.
 
-BAL Easy Heirs lets you generate a printable, fold-in-three A4 sheet for each beneficiary: for people without their own wallet it creates a fresh address, BIP39 seed phrase and public key offline; for people who already have an address it produces a one-page summary card. Once ready, the heir list can be exported as JSON and imported directly into BAL.
+Easy Heirs lets you generate a printable, fold-in-three A4 sheet for each beneficiary: for people without their own wallet it creates a fresh address, BIP39 seed phrase and public key offline; for people who already have an address it produces a one-page summary card. Once ready, the heir list can be exported as JSON and imported directly into BAL.
 
 ## Features
 
@@ -22,7 +22,7 @@ BAL Easy Heirs lets you generate a printable, fold-in-three A4 sheet for each be
 
 1. Download the latest release ZIP.
 2. In Electrum, go to **Tools → Plugins → Load plugin from ZIP** (or place the extracted `bal_easy_heirs` folder in Electrum's `plugins` directory).
-3. Enable **BAL Easy Heirs** from the plugin list.
+3. Enable **Easy Heirs** from the plugin list.
 
 ## Verify your download
 

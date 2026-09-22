@@ -1,4 +1,4 @@
-# Releasing BAL Easy Heirs
+# Releasing Easy Heirs
 
 This is the fixed procedure for cutting a signed, verifiable release. Follow
 it every time; it always produces the same set of assets.
@@ -71,7 +71,7 @@ Expected: `bal_easy_heirs_vX.Y.Z.zip: OK` and
 ### 5. Tag the commit
 
 ```bash
-git tag -a vX.Y.Z -m "BAL Easy Heirs vX.Y.Z"
+git tag -a vX.Y.Z -m "Easy Heirs vX.Y.Z"
 git push origin vX.Y.Z
 ```
 

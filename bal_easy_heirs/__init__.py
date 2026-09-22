@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-BAL Easy Heirs - SAFE21
+Easy Heirs - SAFE21
 
 Plugin satellite del plugin Bitcoin After Life (BAL) per Electrum.
 
@@ -10,7 +10,7 @@ consegnare. Non costruisce, non firma e non trasmette transazioni: resta
 compito di BAL.
 """
 
-fullname = "BAL Easy Heirs"
+fullname = "Easy Heirs"
 description = (
     "Documenti stampabili per i beneficiari dell'eredita', con generazione "
     "di indirizzi e seed BIP39 per chi non ne ha uno proprio."

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-BAL Easy Heirs - SAFE21
+Easy Heirs - SAFE21
 sheets.py : disegno dei fogli, coordinate in millimetri.
 
 Correzione rispetto alla versione precedente
@@ -635,7 +635,7 @@ def render_given(s, d):
     s.text(MARGIN, PAGE_H - 14,
            "Nessuna parola di recupero e' contenuta in questo foglio.",
            C_MUTED, size=7)
-    s.text(MARGIN, PAGE_H - 10.5, "BAL Easy Heirs \u00b7 SAFE21",
+    s.text(MARGIN, PAGE_H - 10.5, "Easy Heirs \u00b7 SAFE21",
            C_MUTED, size=7)
 
 
@@ -655,7 +655,7 @@ def render_blank_back(s):
               "Pagina lasciata intenzionalmente vuota \u2014 serve a mantenere "
               "allineata la stampa fronte/retro",
               C_MUTED, size=9, bold=True)
-    s.text(MARGIN, PAGE_H - 10.5, "BAL Easy Heirs \u00b7 SAFE21",
+    s.text(MARGIN, PAGE_H - 10.5, "Easy Heirs \u00b7 SAFE21",
            C_MUTED, size=7)
 
 
@@ -795,6 +795,6 @@ def render_report(s, wallet_name, rows, page=1, per_page=9):
            "esistono solo sui fogli stampati e dentro questo wallet.",
            C_MUTED, size=6.8)
     s.text(MARGIN, PAGE_H - 10.5,
-           f"BAL Easy Heirs \u00b7 SAFE21   \u2014   pagina {page} di "
+           f"Easy Heirs \u00b7 SAFE21   \u2014   pagina {page} di "
            f"{total_pages}", C_MUTED, size=6.8)
     return total_pages

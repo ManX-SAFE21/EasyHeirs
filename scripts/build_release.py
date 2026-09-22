@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Build a reproducible release ZIP of the BAL Easy Heirs plugin and its
+Build a reproducible release ZIP of the Easy Heirs plugin and its
 SHA-256 checksum.
 
 Reproducible means: the same source tree always produces byte-for-byte the

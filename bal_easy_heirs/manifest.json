@@ -1,6 +1,6 @@
 {
     "name": "bal_easy_heirs",
-    "fullname": "BAL Easy Heirs",
+    "fullname": "Easy Heirs",
     "description": "Genera guide stampabili per i beneficiari della lista BAL. Per chi non ha un indirizzo proprio crea indirizzo, seed BIP39 e chiave pubblica; per chi lo ha fornito produce una scheda di una pagina. Foglio A4 da piegare in tre, con banda di protezione sul retro.",
     "icon": "safe21.png",
     "available_for": [
@@ -8,5 +8,5 @@
     ],
     "author": "SAFE21",
     "license": "MIT",
-    "version": "0.7.2"
+    "version": "0.7.3"
 }
