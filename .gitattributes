@@ -1,0 +1,5 @@
+# Keep the plugin sources LF in the working tree too, so a checkout matches
+# what the reproducible build produces. build_release.py normalises anyway;
+# this keeps the two consistent for anyone reading the files.
+* text=auto eol=lf
+*.png binary

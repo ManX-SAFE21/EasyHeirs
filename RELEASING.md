@@ -43,6 +43,12 @@ This writes `dist/bal_easy_heirs_vX.Y.Z.zip` and its `.sha256`. The build is
 reproducible: re-running it yields a byte-identical ZIP and the same hash, so
 anyone can rebuild and confirm the published checksum.
 
+That holds across machines because the script normalises text files to LF
+before archiving them. Git stores LF, but a checkout on Windows with
+`core.autocrlf=true` writes CRLF to disk — without the normalisation the same
+commit would produce a different ZIP, and a different checksum, depending on
+who built it.
+
 ### 3. Sign the ZIP (release manager only)
 
 Signing needs the private key and its passphrase, so it is done by hand, not

@@ -7,8 +7,9 @@ SHA-256 checksum.
 Reproducible means: the same source tree always produces byte-for-byte the
 same ZIP, hence the same SHA-256. This lets anyone rebuild the archive and
 check that the published hash matches, independently of who built it. To get
-there we sort the file list, zero out per-file timestamps and force fixed
-permissions, so nothing machine- or time-specific leaks into the archive.
+there we sort the file list, zero out per-file timestamps, force fixed
+permissions and normalise text files to LF line endings, so nothing machine-,
+time- or checkout-specific leaks into the archive.
 
 Usage (from the repository root):
 
@@ -40,6 +41,27 @@ FIXED_TIME = (2020, 1, 1, 0, 0, 0)
 # Files inside the package we never want to ship.
 SKIP_DIRS = {"__pycache__"}
 SKIP_SUFFIXES = (".pyc", ".pyo")
+
+# Text files are normalised to LF before going into the archive. Without this
+# the build is only reproducible by accident: git stores LF, but a checkout on
+# Windows with core.autocrlf=true writes CRLF to disk, so the same commit would
+# produce a different ZIP — and a different SHA-256 — depending on who built
+# it. Anything not listed here (the PNG) is copied through byte for byte.
+TEXT_SUFFIXES = (".py", ".json", ".md", ".txt", ".svg", ".cfg", ".ini")
+TEXT_NAMES = ("VERSION", "LICENSE")
+
+CR, LF = bytes([13]), bytes([10])
+CRLF = CR + LF
+
+
+def read_normalised(path: str) -> bytes:
+    """File contents, with CRLF and lone CR turned into LF for text files."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    name = os.path.basename(path)
+    if name in TEXT_NAMES or name.endswith(TEXT_SUFFIXES):
+        data = data.replace(CRLF, LF).replace(CR, LF)
+    return data
 
 
 def read_version() -> str:
@@ -75,8 +97,7 @@ def build_zip(zip_path: str, files: list) -> None:
             info = zipfile.ZipInfo(arc, date_time=FIXED_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16   # regular file, rw-r--r--
-            with open(full, "rb") as fh:
-                z.writestr(info, fh.read())
+            z.writestr(info, read_normalised(full))
 
 
 def sha256_of(path: str) -> str:
