@@ -1,4 +1,4 @@
-# BAL Easy Heirs
+# Easy Heirs
 
 A free companion plugin for [Electrum Wallet](https://electrum.org) that helps you prepare the heir list for **BAL — Bitcoin After Life**.
 
