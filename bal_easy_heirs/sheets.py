@@ -16,6 +16,8 @@ device e' il dispositivo su cui il painter sta dipingendo. Tutte le misure
 restano quindi nella stessa unita'.
 """
 
+import os
+import pkgutil
 import random
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
@@ -376,6 +378,104 @@ STEPS_SEED = [
 ]
 
 
+def _protection_band(s):
+    """Banda scura sull'ultimo terzo del RETRO, cioe' esattamente dietro
+    le parole stampate sul fronte.
+
+    Serve a impedire che le parole si leggano in controluce a foglio
+    piegato. Non e' nero pieno: sopra il fondo scuro spargiamo migliaia di
+    puntini di grigi diversi, perche' una tinta uniforme lascerebbe comunque
+    intravedere la sagoma del testo, mentre un fondo irregolare la confonde.
+
+    Condivisa fra il retro dell'erede e quello del paper wallet.
+    """
+    # banda di protezione sull'ultimo terzo, dietro le parole del fronte
+    s.fill(0, FOLD2, PAGE_W, PAGE_H - FOLD2, C_BLACK)
+    rnd = random.Random()
+    s.p.setPen(Qt.PenStyle.NoPen)
+    top, h, wd = s.mm(FOLD2), s.mm(PAGE_H - FOLD2), s.mm(PAGE_W)
+    dot = s.mm(0.45)
+    for _ in range(3200):
+        g = rnd.randint(12, 92)
+        s.p.setBrush(QBrush(QColor(g, g, g)))
+        s.p.drawRect(QRectF(rnd.uniform(0, wd), top + rnd.uniform(0, h),
+                            dot, dot))
+    s.centred(PAGE_W / 2, (FOLD2 + PAGE_H) / 2 - 2,
+              "AREA DI PROTEZIONE  \u2014  copre le parole in controluce",
+              QColor("#3C3C3C"), size=8, bold=True)
+
+
+# Corpo delle parole di recupero: 15.75 = 10.5 + 50%, come chiesto dal
+# titolare. Sono il dato piu' importante del foglio e vanno lette senza
+# sforzo, magari da una persona anziana e in un momento difficile.
+WORDS_SIZE = 15.75
+
+# Sotto questa quota molte stampanti non stampano affatto: e' il margine di
+# sicurezza in fondo al foglio, non un margine estetico.
+BOTTOM_SAFE = 6.0
+
+
+def _words_grid(s, words, top, bottom_limit=None, size=WORDS_SIZE):
+    """Griglia delle parole di recupero. Ritorna la y sotto l'ultima riga.
+
+    Condivisa fra il foglio dell'erede e il paper wallet: e' la parte piu'
+    delicata della stampa, quindi ha senso che esista in un solo posto.
+
+    12 parole -> 3 colonne, caselle larghe e molto leggibili. 24 parole -> 4
+    colonne: con 3 servirebbero 8 righe e si finirebbe sotto il bordo
+    stampabile.
+
+    L'altezza delle caselle NON e' un numero fisso: si ricava dalle metriche
+    del font, cosi' cambiando il corpo le caselle crescono con le parole
+    invece di tagliarle. Se ``bottom_limit`` e' indicato e la griglia lo
+    supererebbe, il corpo viene ridotto quel tanto che basta per rientrare:
+    meglio parole un filo piu' piccole che parole stampate fuori dal foglio.
+    """
+    cols = 4 if len(words) > 12 else 3
+    rows = (len(words) + cols - 1) // cols
+    bw = (PAGE_W - 2 * MARGIN) / cols
+
+    def box_height(sz):
+        """Riga di testo piu' il respiro sopra e sotto."""
+        return s.to_mm(s.metrics(s.font(sz, bold=True, mono=True)).height()) + 4.8
+
+    bh = box_height(size)
+    while bottom_limit is not None and size > 8.0 and top + rows * bh > bottom_limit:
+        size -= 0.25
+        bh = box_height(size)
+
+    f = s.font(size, bold=True, mono=True)
+    lh = s.to_mm(s.metrics(f).height())
+    pad = max(1.6, (bh - 2 - lh) / 2)      # centra la parola nella casella
+    for i, word in enumerate(words):
+        r, c = divmod(i, cols)
+        bx = MARGIN + c * bw
+        byy = top + r * bh
+        s.box(bx + 1, byy, bw - 2, bh - 2, C_RULE, 0.35)
+        s.text(bx + 3, byy + 1.0, str(i + 1), C_MUTED, size=6.5)
+        # Parole in verde scuro invece che in nero: restano ben leggibili ma
+        # trasparono molto meno se qualcuno illumina il foglio piegato da
+        # dietro con una luce forte (il verde e' meno denso del nero).
+        s.text(bx + 9, byy + pad, word, C_ACC_D, font=f)
+    return top + rows * bh
+
+
+def _words_tail_limit(s, texts):
+    """Fin dove puo' arrivare la griglia, dati i testi che la seguono.
+
+    Li misuriamo PRIMA di disegnare: cosi' la griglia sa quanto spazio deve
+    lasciare e si adatta da sola, invece di scoprire troppo tardi che il testo
+    finale non ci sta piu'.
+
+    ``texts`` e' una lista di ``(testo, corpo)``.
+    """
+    w = PAGE_W - 2 * MARGIN
+    need = 3.0
+    for txt, sz in texts:
+        need += s.measure(w, txt, size=sz, bold=True) + 1
+    return PAGE_H - BOTTOM_SAFE - need
+
+
 def render_seed_front(s, d):
     y = _header(s, "EREDITA' IN BITCOIN  \u00b7  DOCUMENTO PER IL BENEFICIARIO",
                 d["name"],
@@ -413,41 +513,31 @@ def render_seed_front(s, d):
     # ---- terzo terzo: le parole ----
     s.text(MARGIN, FOLD2 + 4, "PAROLE DI RECUPERO  \u2014  DA TENERE SEGRETE",
            C_ALERT, size=10.5, bold=True)
+    # Dicitura del formato accanto alle parole: chi ritrova il foglio fra anni
+    # deve capire in tre secondi quali istruzioni valgono, senza dedurlo.
+    kind_tag = ("SEED ELECTRUM" if d.get("seed_kind") == "electrum"
+                else "SEED BIP39")
+    fk = s.font(8, bold=True)
+    kw_ = s.to_mm(s.metrics(fk).horizontalAdvance(kind_tag))
+    s.text(PAGE_W - MARGIN - kw_, FOLD2 + 5, kind_tag, C_ACC_D, font=fk)
     words = d["seed"].split()
-    # 12 parole -> 3 colonne, caselle larghe e molto leggibili.
-    # 24 parole -> 4 colonne: con 3 servirebbero 8 righe e l'ultima riga di
-    # testo finirebbe a 7 mm dal bordo, dentro la zona che molte stampanti
-    # non stampano affatto.
-    cols = 4 if len(words) > 12 else 3
-    bw = (PAGE_W - 2 * MARGIN) / cols
-    bh = 10.5 if len(words) <= 12 else 9.5
-    top = FOLD2 + 12
-    for i, word in enumerate(words):
-        r, c = divmod(i, cols)
-        bx = MARGIN + c * bw
-        byy = top + r * bh
-        s.box(bx + 1, byy, bw - 2, bh - 2, C_RULE, 0.35)
-        s.text(bx + 3, byy + 1.2, str(i + 1), C_MUTED, size=6)
-        # Parole in verde scuro invece che in nero: restano ben leggibili ma
-        # trasparono molto meno se qualcuno illumina il foglio piegato da dietro
-        # con una luce forte (l'inchiostro verde e' meno denso del nero).
-        s.text(bx + 8, byy + 2.4, word, C_ACC_D, size=10.5, bold=True, mono=True)
-
-    yy = top + ((len(words) + cols - 1) // cols) * bh + 3
-    yy = s.wrapped(MARGIN, yy, PAGE_W - 2 * MARGIN,
-                   "Chiunque legga queste parole puo' prendere i fondi. "
-                   "Piega il foglio in tre lungo i segni e tienilo chiuso.",
-                   C_ALERT, size=7.4, bold=True) + 1
-    acct = d.get("account_derivation") or "m/84'/0'/0'"
     # Va stampato il percorso dell'ACCOUNT (m/84'/0'/0'), non quello del
     # primo indirizzo (m/84'/0'/0'/0/0): e' il primo che i wallet chiedono
     # nel campo "derivazione". Scrivere il secondo porterebbe a un wallet
     # diverso e vuoto.
-    s.wrapped(MARGIN, yy, PAGE_W - 2 * MARGIN,
-              "Seed in formato BIP39 standard: funziona in qualunque wallet "
+    acct = d.get("account_derivation") or "m/84'/0'/0'"
+    t_warn = ("Chiunque legga queste parole puo' prendere i fondi. "
+              "Piega il foglio in tre lungo i segni e tienilo chiuso.")
+    t_note = ("Seed in formato BIP39 standard: funziona in qualunque wallet "
               "compatibile, non solo in Electrum. Percorso di derivazione da "
               f"inserire: {acct}. "
-              "Istruzioni complete sul RETRO di questo foglio.",
+              "Istruzioni complete sul RETRO di questo foglio.")
+    limit = _words_tail_limit(s, [(t_warn, 7.4), (t_note, 10.2)])
+
+    yy = _words_grid(s, words, FOLD2 + 12, bottom_limit=limit) + 3
+    yy = s.wrapped(MARGIN, yy, PAGE_W - 2 * MARGIN, t_warn,
+                   C_ALERT, size=7.4, bold=True) + 1
+    s.wrapped(MARGIN, yy, PAGE_W - 2 * MARGIN, t_note,
               C_INK, size=10.2, bold=True)
 
     s.fold_marks()
@@ -565,20 +655,7 @@ def render_seed_back(s, has_seed=True):
         s.fold_marks()
         return
 
-    # banda di protezione sull'ultimo terzo, dietro le parole del fronte
-    s.fill(0, FOLD2, PAGE_W, PAGE_H - FOLD2, C_BLACK)
-    rnd = random.Random()
-    s.p.setPen(Qt.PenStyle.NoPen)
-    top, h, wd = s.mm(FOLD2), s.mm(PAGE_H - FOLD2), s.mm(PAGE_W)
-    dot = s.mm(0.45)
-    for _ in range(3200):
-        g = rnd.randint(12, 92)
-        s.p.setBrush(QBrush(QColor(g, g, g)))
-        s.p.drawRect(QRectF(rnd.uniform(0, wd), top + rnd.uniform(0, h),
-                            dot, dot))
-    s.centred(PAGE_W / 2, (FOLD2 + PAGE_H) / 2 - 2,
-              "AREA DI PROTEZIONE  \u2014  copre le parole in controluce",
-              QColor("#3C3C3C"), size=8, bold=True)
+    _protection_band(s)
     s.fold_marks()
 
 
@@ -798,3 +875,323 @@ def render_report(s, wallet_name, rows, page=1, per_page=9):
            f"Easy Heirs \u00b7 SAFE21   \u2014   pagina {page} di "
            f"{total_pages}", C_MUTED, size=6.8)
     return total_pages
+
+
+# --------------------------------------------------------------------------- #
+#  Foglio C: paper wallet (intestazione col logo SAFE21, due pagine)
+# --------------------------------------------------------------------------- #
+
+LOGO_FILE = "safe21-logo-light.png"
+SITE_URL = "safe21.io"
+
+# QImage del logo, caricata una volta sola (None se non disponibile).
+_LOGO_CACHE = []
+
+
+def _logo_image():
+    """Il logo SAFE21 come QImage, oppure None se non si riesce a caricarlo.
+
+    Letto con pkgutil.get_data e non con open(): il plugin gira dentro uno ZIP
+    (zipimport) e un percorso su disco semplicemente non esiste. Il ripiego su
+    open() serve solo quando si lavora sui sorgenti scompattati.
+    """
+    if _LOGO_CACHE:
+        return _LOGO_CACHE[0]
+    data = None
+    pkg = __name__.rsplit(".", 1)[0] if "." in __name__ else None
+    if pkg:
+        try:
+            data = pkgutil.get_data(pkg, LOGO_FILE)
+        except Exception:
+            data = None
+    if data is None:
+        try:
+            here = os.path.dirname(os.path.abspath(__file__))
+            with open(os.path.join(here, LOGO_FILE), "rb") as fh:
+                data = fh.read()
+        except Exception:
+            data = None
+    img = None
+    if data:
+        candidate = QImage()
+        if candidate.loadFromData(data):
+            img = candidate
+    _LOGO_CACHE.append(img)
+    return img
+
+
+def _draw_logo(s, x, y, w_mm):
+    """Disegna il logo mantenendo le proporzioni. Ritorna la y sotto il logo.
+
+    Se il file mancasse non lasciamo un buco: scriviamo il nome. Un foglio
+    senza logo resta valido, un foglio a meta' no.
+    """
+    img = _logo_image()
+    if img is None or img.isNull():
+        s.text(x, y, "SAFE21", C_ACC_D, size=15, bold=True)
+        return y + 7.5
+    h_mm = w_mm * img.height() / float(img.width())
+    s.p.drawImage(QRectF(s.mm(x), s.mm(y), s.mm(w_mm), s.mm(h_mm)), img)
+    return y + h_mm
+
+
+STEPS_PAPER = [
+    ("1.  Versa i fondi quando vuoi",
+     "Inquadra il QR dell'indirizzo qui sopra con il tuo portafoglio e invia "
+     "l'importo che vuoi mettere da parte. Puoi farlo subito o fra anni, e "
+     "puoi versare piu' volte sullo stesso indirizzo."),
+    ("2.  Controlla il saldo senza rischi",
+     "Digita l'indirizzo su un esploratore pubblico come " + EXPLORER + ", "
+     "oppure importa la chiave pubblica qui sopra in un portafoglio di sola "
+     "lettura. In entrambi i casi non serve alcuna parola: si guarda soltanto."),
+    ("3.  Per spendere servono le parole",
+     "Apri l'ultimo terzo del foglio, digita le dodici parole in un "
+     "portafoglio BIP39 (Electrum, Sparrow, BlueWallet, Ledger, Trezor...) e "
+     "avrai di nuovo il controllo dei fondi."),
+    ("4.  Custodia",
+     "Piega il foglio in tre lungo i segni e mettilo in un posto asciutto e al "
+     "riparo dalla luce. La carta teme acqua, sole e fuoco: se la somma e' "
+     "importante, valuta una seconda copia in un altro luogo sicuro."),
+]
+
+
+# Sezioni del retro per un seed NATIVO ELECTRUM. Non sono una variante
+# cosmetica di quelle BIP39: dicono cose opposte (li' si spunta "BIP39 seed" e
+# si digita un percorso, qui non si fa ne' l'uno ne' l'altro). Stampare le
+# istruzioni sbagliate manderebbe la persona su un portafoglio vuoto, quindi i
+# due testi restano separati e non si mescolano mai.
+
+SEC_A_ELECTRUM = [
+    ("Per queste parole serve Electrum",
+     "Sono nel formato nativo di Electrum e contengono un marcatore che "
+     "Electrum riconosce. La maggior parte degli altri portafogli non le "
+     "accetta: per riprendere i fondi usa Electrum. (Se un domani volessi "
+     "spostarli altrove, si fa comunque: apri il portafoglio in Electrum e "
+     "invii i fondi dove vuoi.)"),
+    ("Scaricalo solo dal sito ufficiale",
+     "Digita electrum.org a mano nella barra dell'indirizzo. Mai da link "
+     "ricevuti per messaggio o e-mail, e mai dai primi risultati di un motore "
+     "di ricerca: le copie fatte per rubare i fondi si presentano bene e sono "
+     "la truffa piu' comune."),
+    ("Fatti aiutare, ma non consegnare le parole",
+     "Puoi farti assistere da una persona di fiducia competente: puo' "
+     "installare il programma e spiegarti. Quello che non deve mai succedere "
+     "e' che le parole finiscano in mano sua, in una foto o su un sito."),
+]
+
+SEC_B_ELECTRUM = [
+    ("Il ripristino e' breve",
+     "Apri Electrum e scegli di creare un nuovo portafoglio, poi \"Standard "
+     "wallet\" e \"I already have a seed\". Digita le dodici parole "
+     "nell'ordine esatto, in minuscolo, separate da uno spazio."),
+    ("Non serve nessuna opzione e nessun percorso",
+     "A differenza dei seed BIP39 non devi spuntare nulla in \"Options\" e "
+     "non devi indicare alcun percorso di derivazione: Electrum riconosce il "
+     "formato da solo e ricostruisce il portafoglio giusto. E\' il motivo per "
+     "cui questo foglio e\' piu' difficile da sbagliare."),
+    ("Se Electrum dice che il seed non e' valido",
+     "Non prosegui: rileggi le parole. Con questo formato Electrum sa "
+     "riconoscere una frase autentica, quindi quell'avviso significa quasi "
+     "sempre che una parola e' stata letta o digitata male."),
+]
+
+
+def render_paper_front(s, d):
+    """Fronte del paper wallet: intestazione con logo, indirizzo da alimentare
+    e, nell'ultimo terzo, le parole di recupero."""
+    s.fill(0, 0, PAGE_W, 3.5, C_ACC)
+
+    # --- intestazione: logo a sinistra, identificativo a destra ---
+    ly = _draw_logo(s, MARGIN, 7.5, 38.0)
+    s.text(MARGIN, ly + 1.2, SITE_URL, C_ACC_D, size=8, bold=True)
+
+    right = PAGE_W - MARGIN
+    ftag = s.font(7.5, bold=True)
+    tag = "PAPER WALLET"
+    tw = s.to_mm(s.metrics(ftag).horizontalAdvance(tag))
+    s.text(right - tw, 8, tag, C_ACC_D, font=ftag)
+
+    fname = s.font(17, bold=True)
+    nm = d["name"]
+    nw = s.to_mm(s.metrics(fname).horizontalAdvance(nm))
+    s.text(right - nw, 12, nm, C_INK, font=fname)
+
+    # Data di creazione al centro della fascia: e' l'unico dato che dice
+    # QUANDO questo foglio e' stato generato, e su un documento che puo'
+    # restare in un cassetto per anni non e' un dettaglio.
+    created = d.get("created_str") or ""
+    if created:
+        s.centred(PAGE_W / 2, 13, "creato il " + created, C_MUTED,
+                  size=9.5, bold=True)
+
+    y = 26
+    s.rule(MARGIN, y, PAGE_W - MARGIN, C_RULE, 0.4)
+    y += 4
+
+    y = _address_block(s, y, d["address"], d.get("xpub", ""))
+
+    # --- secondo terzo: istruzioni ---
+    y = max(y, FOLD1 + 7)
+    y = s.text(MARGIN, y, "COME SI USA", C_ACC_D, size=10.5, bold=True) + 3
+    w = PAGE_W - 2 * MARGIN
+    for head, body in STEPS_PAPER:
+        y = s.text(MARGIN, y, head, C_INK, size=8.2, bold=True) + 0.8
+        y = s.wrapped(MARGIN + 4, y, w - 4, body, C_BODY, size=7.8) + 2.2
+
+    # --- avviso, ancorato sopra la piega ---
+    warn = ("Questo foglio e' l'unica copia: le parole non sono salvate da "
+            "nessuna parte, nemmeno nel computer che le ha generate. Prima di "
+            "versare qualsiasi importo, controlla che tutte le dodici parole "
+            "siano stampate e leggibili. Se il foglio si perde o si rovina, i "
+            "fondi non sono piu' recuperabili da nessuno.")
+    hw = s.measure(w - 6, warn, size=7.4) + 9
+    by = FOLD2 - hw - 4
+    s.box(MARGIN, by, w, hw, C_ALERT, 0.5)
+    s.text(MARGIN + 3, by + 2, "NON ESISTE UNA SECONDA COPIA",
+           C_ALERT, size=7.8, bold=True)
+    s.wrapped(MARGIN + 3, by + 6.5, w - 6, warn, C_BODY, size=7.4)
+
+    # --- terzo terzo: le parole ---
+    s.text(MARGIN, FOLD2 + 4, "PAROLE DI RECUPERO  —  DA TENERE SEGRETE",
+           C_ALERT, size=10.5, bold=True)
+    # Dicitura del formato accanto alle parole: chi ritrova il foglio fra
+    # anni deve capire in tre secondi quali istruzioni valgono.
+    kind_tag = ("SEED ELECTRUM" if d.get("seed_kind") == "electrum"
+                else "SEED BIP39")
+    fk = s.font(8, bold=True)
+    kw_ = s.to_mm(s.metrics(fk).horizontalAdvance(kind_tag))
+    s.text(PAGE_W - MARGIN - kw_, FOLD2 + 5, kind_tag, C_ACC_D, font=fk)
+    acct = d.get("account_derivation") or "m/84'/0'/0'"
+    t_warn = ("Chiunque legga queste parole puo' prendere i fondi. "
+              "Piega il foglio in tre lungo i segni e tienilo chiuso.")
+    if d.get("seed_kind") == "electrum":
+        t_note = ("Seed in formato nativo Electrum: si ripristina digitando le "
+                  "parole in Electrum, SENZA spuntare opzioni e SENZA indicare "
+                  "alcun percorso di derivazione. Altri portafogli in genere "
+                  "non lo accettano. Istruzioni complete sul RETRO.")
+    else:
+        t_note = ("Seed in formato BIP39 standard: funziona in qualunque wallet "
+                  "compatibile, non solo in Electrum. Percorso di derivazione da "
+                  "inserire: " + acct + ". Istruzioni complete sul RETRO.")
+    limit = _words_tail_limit(s, [(t_warn, 7.4), (t_note, 10.2)])
+
+    yy = _words_grid(s, d["seed"].split(), FOLD2 + 12, bottom_limit=limit) + 3
+    yy = s.wrapped(MARGIN, yy, PAGE_W - 2 * MARGIN, t_warn,
+                   C_ALERT, size=7.4, bold=True) + 1
+    s.wrapped(MARGIN, yy, PAGE_W - 2 * MARGIN, t_note,
+              C_INK, size=10.2, bold=True)
+
+    s.fold_marks()
+
+
+def render_paper_back(s, d=None):
+    """Retro del paper wallet: istruzioni di recupero, nota sulla generazione
+    e banda di protezione.
+
+    ``d`` serve solo alla nota finale, che deve dire il vero su COME e\' stata
+    prodotta questa chiave: quanti bit di entropia e se il secondo controllo
+    (libreria BIP39 di riferimento) e\' stato eseguito davvero. Se manca, la
+    nota viene scritta nella versione prudente.
+    """
+    s.centred(PAGE_W / 2, 11,
+              "STAMPA FRONTE/RETRO  —  GIRO SUL LATO LUNGO   "
+              "·   PIEGA IN TRE LUNGO I SEGNI",
+              C_MUTED, size=8, bold=True)
+
+    ly = _draw_logo(s, MARGIN, 17, 34.0)
+    s.text(MARGIN, ly + 1.2, SITE_URL, C_ACC_D, size=8, bold=True)
+
+    d = d or {}
+    is_electrum = d.get("seed_kind") == "electrum"
+
+    w = PAGE_W - 2 * MARGIN
+    y = ly + 10
+    y = s.text(MARGIN, y, "COME RIPRENDERE I FONDI", C_ACC_D,
+               size=12, bold=True) + 1.5
+    y = s.wrapped(MARGIN, y, w,
+                  "Da fare solo quando vuoi spendere: fino ad allora il foglio "
+                  "resta chiuso e i fondi restano dove sono.",
+                  C_MUTED, size=7.6) + 3
+
+    if is_electrum:
+        y = _section(s, y, w, "A", "CON QUALE PROGRAMMA", SEC_A_ELECTRUM,
+                     C_ACC_D)
+        y = _section(s, y, w, "B", "COME SI RIPRISTINA", SEC_B_ELECTRUM,
+                     C_ACC_D)
+    else:
+        y = _section(s, y, w, "A", "CON QUALE PROGRAMMA", SEC_A, C_ACC_D)
+        y = _section(s, y, w, "B", "SE SCEGLI ELECTRUM", SEC_B, C_ACC_D)
+
+    y = s.text(MARGIN, y, "C.   VERIFICA FINALE  -  CON QUALUNQUE PROGRAMMA",
+               C_ALERT, size=9.5, bold=True) + 2
+    y = s.text(MARGIN + 4, y, "Confronta il primo indirizzo", C_INK,
+               size=8.0, bold=True) + 0.6
+    y = s.wrapped(MARGIN + 8, y, w - 8,
+                  "A portafoglio creato, apri la sezione Ricevi (o Indirizzi) "
+                  "e confronta il primo indirizzo con quello stampato sul "
+                  "fronte di questo foglio. Devono essere identici, carattere "
+                  "per carattere. Se non coincidono hai sbagliato una parola o "
+                  "il percorso di derivazione: ricontrolla e ripeti.",
+                  C_BODY, size=7.6)
+
+    # --- come e' stata generata la chiave -------------------------------
+    # Va stampato sulla carta, non solo scritto nel codice: chi riceve un
+    # paper wallet deve poter sapere da dove viene la casualita' senza dover
+    # credere sulla parola a chi gliel'ha dato.
+    bits = d.get("entropy_bits") or (132 if is_electrum else 128)
+    if is_electrum:
+        gen = ("Le parole non le ha scelte una persona e non le ha prodotte un "
+               "generatore scritto per l'occasione: le ha generate Electrum "
+               f"stesso, con la propria sorgente di casualita' crittografica, "
+               f"a partire da {bits} bit di entropia. Il plugin non si collega "
+               "a internet per generarle: tutto avviene sul computer che ha "
+               "stampato questo foglio. Prima della stampa Electrum ha "
+               "confermato che la frase e' un seed valido di tipo segwit; in "
+               "caso contrario il foglio non sarebbe stato stampato. Formato "
+               "nativo Electrum (segwit).")
+    else:
+        checks = ("Prima della stampa la frase e' stata verificata due volte: "
+                  "dal plugin e, in modo indipendente, dalla libreria BIP39 di "
+                  "riferimento, che non condivide codice con la prima. "
+                  if d.get("ref_checked") else
+                  "Prima della stampa la frase e' stata verificata dal "
+                  "controllo di validita' BIP39 del plugin. ")
+        gen = ("Le parole non le ha scelte una persona e non le ha prodotte un "
+               f"generatore inventato per l'occasione: derivano da {bits} bit "
+               "di casualita' forniti dal sistema operativo (os.urandom), lo "
+               "stesso generatore crittografico su cui si appoggiano i "
+               "programmi di cifratura. Il plugin non si collega a internet "
+               "per generarle: tutto avviene sul computer che ha stampato "
+               "questo foglio. " + checks +
+               "Se un controllo fosse fallito, il foglio non sarebbe stato "
+               "stampato. Standard BIP39, derivazione "
+               + (d.get("account_derivation") or "m/84'/0'/0'") + ".")
+
+    # Il riquadro si appoggia sopra la banda, ma senza mai salire sopra il
+    # testo che lo precede: se le istruzioni fossero piu' lunghe del previsto
+    # (traduzioni, font diversi) scenderebbe, e allora il corpo si riduce
+    # quel tanto che basta per stare nello spazio rimasto.
+    top_min = y + 4
+    size = 7.4
+    while True:
+        hg = s.measure(w - 6, gen, size=size) + 9
+        gy = max(top_min, FOLD2 - hg - 5)
+        if gy + hg <= FOLD2 - 2 or size <= 5.8:
+            break
+        size -= 0.3
+
+    if gy + hg <= FOLD2 - 2:
+        s.box(MARGIN, gy, w, hg, C_RULE, 0.4)
+        s.text(MARGIN + 3, gy + 2, "COME E' STATA GENERATA QUESTA CHIAVE",
+               C_ACC_D, size=7.8, bold=True)
+        s.wrapped(MARGIN + 3, gy + 6.5, w - 6, gen, C_BODY, size=size)
+    else:
+        # Non ci sta nemmeno al minimo: meglio nessuna nota che una nota
+        # stampata sopra la banda nera, dove sarebbe illeggibile.
+        import logging
+        logging.getLogger(__name__).error(
+            "nota sulla generazione non stampata: spazio insufficiente "
+            "(testo fino a %.1f mm, banda a %.1f)", y, FOLD2)
+
+    _protection_band(s)
+    s.fold_marks()

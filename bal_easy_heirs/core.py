@@ -60,6 +60,31 @@ XTYPE = "p2wpkh"
 
 SEED_WORDS = 12
 
+# I due formati di frase che il plugin sa produrre.
+#
+#   BIP39     lo standard: funziona in quasi tutti i portafogli, ma per
+#             ripristinarlo bisogna anche digitare il percorso di derivazione,
+#             ed e' l'errore piu' facile da fare (percorso sbagliato ->
+#             portafoglio diverso e vuoto, senza alcun messaggio d'errore).
+#   ELECTRUM  il formato nativo di Electrum: niente percorso da digitare
+#             (quindi quell'errore non esiste) e frase riconoscibile grazie a
+#             un marcatore di versione, ma si ripristina praticamente solo in
+#             Electrum.
+#
+# Gli EREDI usano sempre BIP39: quei fogli finiscono in mano ad altri, che
+# useranno il portafoglio che vogliono loro. La scelta esiste solo per i paper
+# wallet, che restano di chi li crea.
+SEED_KIND_BIP39 = "bip39"
+SEED_KIND_ELECTRUM = "electrum"
+SEED_KINDS = (SEED_KIND_BIP39, SEED_KIND_ELECTRUM)
+
+# Tipo di seed Electrum da generare: "segwit" da indirizzi bc1q e chiave
+# zpub, gli stessi che gia' produciamo con BIP39.
+ELECTRUM_SEED_TYPE = "segwit"
+# Percorso usato internamente da Electrum per i seed segwit. Lo teniamo come
+# informazione, NON come istruzione: non va digitato da nessuna parte.
+ELECTRUM_DERIVATION = "m/0'"
+
 # Importo segnaposto. Deve superare due filtri di BAL: validate_amount
 # (float > 0.00000001) e la soglia dust in fase di costruzione transazione,
 # sotto la quale l'erede verrebbe escluso senza alcun messaggio.
@@ -68,6 +93,125 @@ PLACEHOLDER_SATS = 10000
 # Oltre questo valore un locktime Bitcoin e' un timestamp, sotto e' un numero
 # di blocco. Serve a non trasformare l'altezza 800000 in una data del 1970.
 LOCKTIME_IS_TIME = 500_000_000
+
+
+# Versione del CODICE che sta girando adesso. Non viene letta da un file:
+# deve valere esattamente quanto era scritto nei sorgenti al momento
+# dell'import, perche' serve proprio a confrontarla con quella dichiarata dal
+# file su disco. scripts/build_release.py verifica che coincida con il
+# manifest a ogni build, cosi' non puo' restare indietro per distrazione.
+RUNNING_VERSION = "0.9.9"
+
+
+PLUGIN_NAME = "bal_easy_heirs"   # il campo "name" del manifest, come lo usa Electrum
+
+
+def _package_path():
+    """Il file .zip (o la cartella) da cui questo plugin e' stato caricato.
+
+    Dentro uno ZIP ``__file__`` e' un percorso finto del tipo
+    ``.../plugin.zip/bal_easy_heirs/core.py``: risalendo si trova il primo
+    elemento che esiste davvero su disco. Puo' essere l'archivio, ma anche
+    soltanto la cartella dei plugin, se quell'archivio nel frattempo e' stato
+    rimosso -- ed e' proprio cio' che accade aggiornando.
+    """
+    p = os.path.abspath(__file__)
+    while True:
+        if os.path.exists(p):
+            return p
+        parent = os.path.dirname(p)
+        if not parent or parent == p:
+            return None
+        p = parent
+
+
+def plugin_dir():
+    """La cartella in cui Electrum tiene i plugin esterni, o None."""
+    path = _package_path()
+    if not path:
+        return None
+    return path if os.path.isdir(path) else os.path.dirname(path)
+
+
+def _manifest_version(path):
+    """La versione dichiarata da uno ZIP, se contiene QUESTO plugin.
+
+    Il confronto e' sul campo ``name`` del manifest, non sul nome del file:
+    e' lo stesso criterio con cui Electrum riconosce i plugin esterni, e il
+    nome del file e' invece libero (il nostro ci mette dentro la versione).
+    """
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        for name in z.namelist():
+            if name.endswith("manifest.json") and name.count("/") <= 1:
+                d = json.loads(z.read(name).decode("utf-8"))
+                if d.get("name") == PLUGIN_NAME:
+                    return d.get("version")
+                return None
+    return None
+
+
+def _version_key(v):
+    """Ordina "0.10.0" dopo "0.9.4", cosa che l'ordine alfabetico non fa."""
+    try:
+        return tuple(int(part) for part in str(v).split("."))
+    except (TypeError, ValueError):
+        return ()
+
+
+def installed_version(directory=None):
+    """La versione piu' recente di questo plugin presente su disco, o None.
+
+    Guarda tutta la cartella perche' un aggiornamento non sovrascrive niente:
+    arriva come archivio con un altro nome. Fra piu' copie vince la piu' alta,
+    cosi' uno ZIP vecchio dimenticato accanto a quello nuovo non fa scattare
+    avvisi a sproposito.
+    """
+    here = os.path.abspath(__file__)
+    try:
+        # Installazione scompattata: il manifest sta accanto ai sorgenti.
+        if os.path.isfile(here):
+            fn = os.path.join(os.path.dirname(here), "manifest.json")
+            if os.path.isfile(fn):
+                with open(fn, "r", encoding="utf-8") as fh:
+                    return json.load(fh).get("version")
+            return None
+    except Exception as e:
+        _logger.info(f"manifest su disco non leggibile: {e}")
+        return None
+
+    folder = directory or plugin_dir()
+    if not folder or not os.path.isdir(folder):
+        return None
+    found = []
+    for name in sorted(os.listdir(folder)):
+        if not name.lower().endswith(".zip"):
+            continue
+        try:
+            v = _manifest_version(os.path.join(folder, name))
+        except Exception as e:
+            # Un archivio illeggibile o di un altro plugin non deve impedire
+            # di esaminare gli altri.
+            _logger.info(f"{name} non leggibile: {e}")
+            continue
+        if v:
+            found.append(v)
+    if not found:
+        return None
+    return max(found, key=_version_key)
+
+
+def stale_version(directory=None):
+    """La versione su disco se DIVERSA da quella in esecuzione, altrimenti None.
+
+    Serve a un solo scopo: dire all'utente che ha aggiornato il plugin ma sta
+    ancora usando quello vecchio, perche' Python tiene in memoria i moduli
+    gia' importati e nemmeno riabilitare il plugin li ricarica.
+    """
+    disk = installed_version(directory)
+    if disk and disk != RUNNING_VERSION:
+        return disk
+    return None
 
 
 class EasyHeirsError(Exception):
@@ -108,6 +252,40 @@ def load_bip39_wordlist():
     return words
 
 
+def bip39_reference_available() -> bool:
+    """True se la libreria BIP39 di riferimento e' importabile.
+
+    Electrum si porta dietro ``mnemonic`` (l'implementazione di riferimento
+    dello standard). Non e' garantita su ogni build, quindi la trattiamo come
+    un di piu': se c'e' la usiamo per un controllo indipendente, se non c'e'
+    si prosegue con il nostro.
+    """
+    try:
+        from mnemonic import Mnemonic
+        Mnemonic("english")
+        return True
+    except Exception:
+        return False
+
+
+def _reference_rejects(mnemonic: str) -> bool:
+    """True SOLO se la libreria di riferimento dice che la frase non e' valida.
+
+    Se la libreria manca o solleva un errore suo, ritorna False: un problema
+    della libreria non deve impedire di generare un seed che il nostro
+    controllo ha gia' dato per buono.
+    """
+    try:
+        from mnemonic import Mnemonic
+    except Exception:
+        return False
+    try:
+        return not Mnemonic("english").check(mnemonic)
+    except Exception as e:
+        _logger.info(f"controllo BIP39 di riferimento non eseguito: {e}")
+        return False
+
+
 def generate_mnemonic(num_words: int = SEED_WORDS) -> str:
     """
     Genera una frase BIP39 con os.urandom, il generatore crittografico del
@@ -127,10 +305,16 @@ def generate_mnemonic(num_words: int = SEED_WORDS) -> str:
     mnemonic = " ".join(wl[int(bits[i:i + 11], 2)]
                         for i in range(0, len(bits), 11))
 
-    # Verifica indipendente: se il checksum non torna non consegniamo una
-    # frase che potrebbe risultare inutilizzabile.
+    # Doppia verifica prima di consegnare la frase. La prima e' nostra; la
+    # seconda, quando disponibile, la fa la libreria BIP39 di riferimento, che
+    # non condivide una riga di codice con la nostra. Un errore nostro
+    # nell'impacchettare i bit verrebbe intercettato li'.
     if not checksum_is_valid(mnemonic):
         raise EasyHeirsError("checksum BIP39 non valido, generazione annullata")
+    if _reference_rejects(mnemonic):
+        raise EasyHeirsError(
+            "la libreria BIP39 di riferimento rifiuta la frase generata: "
+            "generazione annullata")
     return mnemonic
 
 
@@ -205,12 +389,177 @@ def derive_account(mnemonic: str, passphrase: str = "") -> dict:
             "xpub": account.to_xpub()}
 
 
+def generate_electrum_seed() -> str:
+    """Genera una frase nel formato nativo di Electrum (tipo segwit).
+
+    Qui non scriviamo nulla di nostro: la frase la produce ``make_seed`` di
+    Electrum, con la sua sorgente di casualita' (132 bit). Ci limitiamo a
+    richiamarla in modo difensivo, perche' la firma e' cambiata fra versioni,
+    e a farci confermare da Electrum stesso che la frase risultante e'
+    davvero riconosciuta come seed segwit.
+    """
+    from electrum.mnemonic import Mnemonic
+    m = Mnemonic("en")
+    try:
+        seed = m.make_seed(seed_type=ELECTRUM_SEED_TYPE)
+    except TypeError:
+        # Firme piu' vecchie accettavano il tipo come primo argomento.
+        seed = m.make_seed(ELECTRUM_SEED_TYPE)
+
+    kind = electrum_seed_type(seed)
+    if kind != ELECTRUM_SEED_TYPE:
+        raise EasyHeirsError(
+            "Electrum non riconosce la frase appena generata come seed "
+            f"{ELECTRUM_SEED_TYPE} (ha risposto {kind!r}): generazione "
+            "annullata")
+    return seed
+
+
+def electrum_seed_type(seed: str):
+    """Il tipo di seed secondo Electrum, o None se non si riesce a chiederlo.
+
+    Il nome della funzione e' cambiato fra le versioni (prima ``seed_type``,
+    poi ``calc_seed_type``), quindi le proviamo entrambe.
+    """
+    for mod, name in (("electrum.mnemonic", "calc_seed_type"),
+                      ("electrum.mnemonic", "seed_type"),
+                      ("electrum.keystore", "seed_type")):
+        try:
+            fn = getattr(__import__(mod, fromlist=[name]), name)
+        except Exception:
+            continue
+        try:
+            return fn(seed)
+        except Exception as e:
+            _logger.info(f"{mod}.{name} non utilizzabile: {e}")
+    return None
+
+
+def derive_electrum_account(seed: str, passphrase: str = "") -> dict:
+    """Indirizzo e chiave pubblica di un seed nativo Electrum.
+
+    Ritorna la stessa coppia {"address", "xpub"} di ``derive_account``, cosi'
+    il resto del plugin non deve sapere quale formato sia stato usato.
+    """
+    from electrum import keystore
+    from electrum.bitcoin import pubkey_to_address
+
+    # La firma di from_seed e' cambiata fra le versioni di Electrum: oggi e'
+    # from_seed(seed, *, passphrase, for_multisig=False), cioe' la passphrase
+    # si passa SOLO per nome, mentre in passato era posizionale. Proviamo le
+    # forme note in ordine, dalla piu' recente alla piu' vecchia, invece di
+    # indovinarne una: una firma sbagliata qui bloccherebbe del tutto la
+    # generazione del paper wallet.
+    attempts = (
+        lambda: keystore.from_seed(seed, passphrase=passphrase,
+                                   for_multisig=False),
+        lambda: keystore.from_seed(seed, passphrase=passphrase),
+        lambda: keystore.from_seed(seed),
+        lambda: keystore.from_seed(seed, passphrase, False),
+        lambda: keystore.from_seed(seed, passphrase),
+    )
+    ks, last = None, None
+    for attempt in attempts:
+        try:
+            ks = attempt()
+            break
+        except TypeError as e:
+            last = e
+    if ks is None:
+        raise EasyHeirsError(
+            f"impossibile ricavare le chiavi dal seed Electrum: {last}")
+
+    pub = ks.derive_pubkey(0, 0)
+    if isinstance(pub, (bytes, bytearray)):
+        pub = pub.hex()
+    return {"address": pubkey_to_address(XTYPE, pub),
+            "xpub": ks.get_master_public_key()}
+
+
 def generate_beneficiary(num_words: int = SEED_WORDS):
     """Ritorna (mnemonic, address, xpub). Il mnemonic non deve uscire dalla RAM
     se non per andare in stampa."""
     mnemonic = generate_mnemonic(num_words)
     info = derive_account(mnemonic)
     return mnemonic, info["address"], info["xpub"]
+
+
+# ===========================================================================
+#  Paper wallet
+# ===========================================================================
+#
+# Un paper wallet e' un portafoglio nuovo, generato solo per essere stampato e
+# poi alimentato versandoci dei fondi. A differenza dei beneficiari:
+#
+#   * NON entra nella lista eredi di BAL (non e' un erede: riceverebbe
+#     un'eredita' che nessuno gli ha assegnato);
+#   * NON viene salvato da nessuna parte. Niente registro, niente wallet,
+#     niente file: il seed esiste solo nella RAM del programma e, dopo la
+#     stampa, solo sulla carta.
+#
+# La conseguenza e' voluta ma va ricordata: se il foglio si perde o la stampa
+# esce illeggibile, i fondi versati a quell'indirizzo sono irrecuperabili. Per
+# questo l'interfaccia consente di ristampare finche' la finestra resta
+# aperta, e chiede conferma esplicita prima di chiudere e perdere i seed.
+
+MAX_PAPER_WALLETS = 20
+
+
+def generate_paper_wallets(count: int, num_words: int = SEED_WORDS,
+                           seed_kind: str = SEED_KIND_BIP39) -> list:
+    """Genera ``count`` paper wallet nuovi, senza salvare nulla.
+
+    Ritorna una lista di dizionari con ``name`` ("paperwallet 01", ...),
+    ``address``, ``xpub``, ``seed`` e ``created`` (epoch della generazione).
+    La numerazione riparte sempre da 01: non essendo memorizzato nulla, non
+    c'e' un conteggio precedente a cui agganciarsi.
+
+    ``seed_kind`` sceglie il formato della frase: BIP39 (predefinito, portabile
+    ovunque) oppure il formato nativo di Electrum (piu' semplice da
+    ripristinare ma legato a Electrum).
+
+    Non riceve il wallet come parametro proprio per rendere evidente, anche
+    dalla firma, che non lo tocca in alcun modo.
+    """
+    if seed_kind not in SEED_KINDS:
+        raise EasyHeirsError(f"formato di seed sconosciuto: {seed_kind!r}")
+    if not isinstance(count, int) or count < 1:
+        raise EasyHeirsError("indicare quanti paper wallet creare (almeno 1)")
+    if count > MAX_PAPER_WALLETS:
+        raise EasyHeirsError(
+            f"massimo {MAX_PAPER_WALLETS} paper wallet per volta")
+
+    now = int(time.time())
+    # Registrato una volta sola: finisce stampato sul foglio, quindi deve
+    # dire il vero. Se la libreria non c'e', il foglio non dovra' vantare un
+    # controllo che non e' avvenuto.
+    is_bip39 = seed_kind == SEED_KIND_BIP39
+    ref = bip39_reference_available() if is_bip39 else False
+    out = []
+    for i in range(1, count + 1):
+        if is_bip39:
+            mnemonic, address, xpub = generate_beneficiary(num_words)
+            derivation = DERIVATION_ACCOUNT
+            bits = 128 if num_words == 12 else 256
+        else:
+            mnemonic = generate_electrum_seed()
+            info = derive_electrum_account(mnemonic)
+            address, xpub = info["address"], info["xpub"]
+            # Percorso informativo: con un seed Electrum non si digita.
+            derivation = ELECTRUM_DERIVATION
+            bits = 132
+        out.append({
+            "name": f"paperwallet {i:02d}",
+            "address": address,
+            "xpub": xpub,
+            "seed": mnemonic,
+            "created": now,
+            "seed_kind": seed_kind,
+            "account_derivation": derivation,
+            "entropy_bits": bits,
+            "ref_checked": ref,
+        })
+    return out
 
 
 # ===========================================================================

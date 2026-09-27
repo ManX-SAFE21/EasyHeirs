@@ -28,7 +28,7 @@ from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QComboBox, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from electrum.i18n import _
@@ -89,6 +89,7 @@ def _load_sibling(mod_name):
     raise ImportError(f"impossibile caricare {mod_name}")
 
 
+art = _load_sibling("art")
 core = _load_sibling("core")
 sheets = _load_sibling("sheets")
 
@@ -167,6 +168,10 @@ MUTED = "#7c8892"       # testo secondario
 BORDER = "#d9dee4"
 SURFACE = "#ffffff"
 DANGER = "#b4232a"
+# Arancio Bitcoin: usato SOLO per i paper wallet, per distinguerli a colpo
+# d'occhio dalle azioni sugli eredi (teal).
+BTC_ORANGE = "#f7931a"
+BTC_ORANGE_D = "#d97e0d"
 DANGER_BG = "#fceeee"
 DANGER_BD = "#e6c3c3"
 
@@ -189,9 +194,9 @@ QCheckBox::indicator:disabled {{ background:#eef0f2; border:1px solid #dde2e6; }
 _QSS = f"""
 QDialog {{ background:#f6f7f9; }}
 QLabel {{ color:{BODY}; font-size:13px; }}
-QLineEdit, QSpinBox {{ padding:6px 8px; border:1px solid {BORDER};
+QLineEdit {{ padding:6px 8px; border:1px solid {BORDER};
     border-radius:6px; background:{SURFACE}; font-size:13px; color:{INK}; }}
-QLineEdit:focus, QSpinBox:focus {{ border:1px solid {TEAL}; }}
+QLineEdit:focus {{ border:1px solid {TEAL}; }}
 QTableWidget {{ border:1px solid {BORDER}; border-radius:6px;
     background:{SURFACE}; gridline-color:#eef1f4; font-size:13px; }}
 QHeaderView::section {{ background:#f0f3f5; color:{MUTED}; padding:7px 10px;
@@ -205,6 +210,9 @@ QPushButton[bal="primary"]:hover {{ background:{TEAL_DARK}; }}
 QPushButton[bal="danger"] {{ background:{DANGER}; border:none; color:white;
     font-weight:600; }}
 QPushButton[bal="danger"]:hover {{ background:#8f1c22; }}
+QPushButton[bal="btc"] {{ background:{BTC_ORANGE}; border:none; color:white;
+    font-weight:600; padding:10px 18px; }}
+QPushButton[bal="btc"]:hover {{ background:{BTC_ORANGE_D}; }}
 QPushButton[bal="del"] {{ border:none; background:transparent; color:{MUTED};
     font-size:16px; font-weight:700; padding:2px 8px; }}
 QPushButton[bal="del"]:hover {{ color:{DANGER}; }}
@@ -227,6 +235,18 @@ def _primary_button(text):
     return b
 
 
+def _btc_button(text):
+    """Pulsante dei paper wallet (arancio Bitcoin pieno).
+
+    Colore diverso di proposito: i paper wallet non c'entrano con la
+    lista eredi, e un teal in piu' li farebbe sembrare la stessa cosa.
+    """
+    b = QPushButton(text)
+    b.setProperty("bal", "btc")
+    b.setCursor(Qt.CursorShape.PointingHandCursor)
+    return b
+
+
 def _danger_button(text):
     """Pulsante di un'azione distruttiva (rosso pieno)."""
     b = QPushButton(text)
@@ -234,7 +254,34 @@ def _danger_button(text):
     return b
 
 
-def _header_band(title, subtitle=""):
+def _band_art(name):
+    """Il disegno decorativo della fascia, come QLabel, o None.
+
+    Sta a destra del titolo, dove altrimenti resterebbe solo sfondo: dice a
+    colpo d'occhio che cosa si sta facendo in quella finestra. Se il disegno
+    non si carica non succede nulla, la fascia resta come prima.
+    """
+    try:
+        ratio = 1.0
+        app = QApplication.instance()
+        screen = app.primaryScreen() if app else None
+        if screen is not None:
+            ratio = screen.devicePixelRatio()
+        pm = art.band_pixmap(name, height=40, ratio=ratio)
+    except Exception as e:
+        _logger.info(f"disegno della fascia non disponibile: {e}")
+        return None
+    if pm is None:
+        return None
+    label = QLabel()
+    label.setPixmap(pm)
+    # Puramente decorativo: non deve rubare spazio al titolo se la finestra
+    # viene stretta.
+    label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    return label
+
+
+def _header_band(title, subtitle="", art_name=None):
     """Fascia d'intestazione: icona SAFE21 + titolo (+ sottotitolo).
 
     Ritorna ``(band, right_layout, subtitle_label)``:
@@ -243,6 +290,10 @@ def _header_band(title, subtitle=""):
         principale (gia' spinto a destra da uno stretch);
       * ``subtitle_label`` = l'etichetta del sottotitolo (o None), per
         aggiornarla a runtime.
+
+    ``art_name`` sceglie il disegno da mettere in fondo a destra fra quelli
+    di ``art.py``. Le finestre che in quello spazio hanno un pulsante non lo
+    passano.
     """
     band = QWidget()
     # IMPORTANTE: lo stile va SCOPATO al solo widget (#objectName), altrimenti
@@ -272,7 +323,31 @@ def _header_band(title, subtitle=""):
         col.addWidget(sub)
     h.addLayout(col)
     h.addStretch(1)
+    if art_name:
+        picture = _band_art(art_name)
+        if picture is not None:
+            h.addWidget(picture)
     return band, h, sub
+
+
+def _ask(parent, title, text):
+    """Domanda si'/no, con i pulsanti in italiano. True se l'utente conferma.
+
+    QMessageBox.question userebbe i pulsanti standard di Qt, che senza le
+    traduzioni di Qt caricate escono in inglese ("Yes"/"No") in mezzo a una
+    finestra italiana. Li rinominiamo a mano. Il No resta quello preselezionato:
+    queste domande arrivano tutte prima di buttare via qualcosa.
+    """
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setWindowTitle(title)
+    box.setText(text)
+    yes = box.addButton(_("Sì"), QMessageBox.ButtonRole.YesRole)
+    no = box.addButton(_("No"), QMessageBox.ButtonRole.NoRole)
+    box.setDefaultButton(no)
+    box.setEscapeButton(no)
+    box.exec()
+    return box.clickedButton() is yes
 
 
 def _info_line(text):
@@ -663,7 +738,8 @@ class PrintDialog(QDialog):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        band, _r, _s = _header_band(_("Stampa documenti"))
+        band, _r, _s = _header_band(_("Stampa documenti"),
+                                    art_name="print")
         outer.addWidget(band)
         outer.addWidget(_info_line(_(
             "Scegli cosa stampare. Puoi ristampare in qualsiasi momento: i "
@@ -1311,7 +1387,7 @@ class MainDialog(QDialog):
         # Intestazione: icona + titolo + sottotitolo. L'azione principale
         # (Aggiungi beneficiari) sta in basso a sinistra, nel footer.
         band, _right, self.subtitle = _header_band(
-            _("Beneficiari dell'eredita'"), " ")
+            _("Beneficiari dell'eredita'"), " ", art_name="heirs")
         outer.addWidget(band)
 
         # Riga informativa leggera (al posto del banner colorato)
@@ -1369,6 +1445,12 @@ class MainDialog(QDialog):
             "oppure inserisci un indirizzo gia' tuo."))
         self.b_add.clicked.connect(self.on_add)
         foot.addWidget(self.b_add)
+
+        self.b_paper = _btc_button(_("Paper wallet") + "…")
+        self.b_paper.setToolTip(_(
+            "Crea tanti paper wallet cartacei dove inserire fondi."))
+        self.b_paper.clicked.connect(self.on_paper)
+        foot.addWidget(self.b_paper)
         b_copy = QPushButton(_("Copia indirizzo"))
         b_copy.clicked.connect(self.on_copy)
         foot.addWidget(b_copy)
@@ -1671,6 +1753,18 @@ class MainDialog(QDialog):
 
 
 
+    def on_paper(self):
+        """Apre la creazione dei paper wallet.
+
+        Non tocca ne' la lista eredi ne' il wallet: i paper wallet
+        vivono solo nella finestra che si apre qui.
+        """
+        try:
+            PaperWalletDialog(self).exec()
+        except Exception as e:
+            _logger.error(f"apertura paper wallet fallita: {e}")
+            QMessageBox.critical(self, _("Easy Heirs"), str(e))
+
     def on_print(self):
         if not self.rows:
             QMessageBox.information(self, _("Easy Heirs"), _(
@@ -1862,6 +1956,294 @@ class AfterCreateDialog(QDialog):
 #  Plugin
 # ===========================================================================
 
+# ===========================================================================
+#  Paper wallet
+# ===========================================================================
+
+def _paper_jobs_for(pw):
+    """Le due pagine di un paper wallet: fronte + retro.
+
+    Sempre due, come per i beneficiari, cosi' la stampa fronte/retro resta
+    allineata anche mescolando piu' paper wallet in un solo lavoro di stampa.
+
+    La data di creazione arriva da core come numero (epoch): qui diventa la
+    stringa che finisce sul foglio. La formattazione sta da questa parte, come
+    per i fogli dei beneficiari, cosi' sheets.py resta solo disegno.
+    """
+    data = dict(pw)
+    created = pw.get("created")
+    if created:
+        data["created_str"] = time.strftime("%d/%m/%Y", time.localtime(created))
+    return [lambda s: sheets.render_paper_front(s, data),
+            lambda s: sheets.render_paper_back(s, data)]
+
+
+class PaperWalletDialog(QDialog):
+    """Crea N paper wallet, li stampa e poi li dimentica.
+
+    I seed NON vengono salvati da nessuna parte: vivono in ``self.wallets``
+    finche' questa finestra resta aperta, e spariscono alla chiusura. Per
+    questo la finestra non si chiude finche' l'utente non conferma di aver
+    controllato i fogli, e fino a quel momento puo' ristampare quante volte
+    vuole: e' l'unica rete di sicurezza possibile quando non si salva nulla.
+    """
+
+    def __init__(self, parent):
+        QDialog.__init__(self, parent)
+        self.wallets = []       # i paper wallet generati (solo in RAM)
+        self.printed = False    # almeno una stampa e' partita
+        self.setWindowTitle(_("Paper wallet") + " — Easy Heirs")
+        self.setMinimumWidth(780)   # la riga del tipo di seed e' larga
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        band, _r, _s = _header_band(_("Crea paper wallet"),
+                                    art_name="paper")
+        outer.addWidget(band)
+        outer.addWidget(_info_line(_(
+            "Portafogli nuovi, da stampare e poi alimentare versandoci dei "
+            "fondi. Non hanno nulla a che vedere con la lista degli eredi.")))
+
+        body = QWidget()
+        vbox = QVBoxLayout(body)
+        vbox.setContentsMargins(18, 16, 18, 14)
+        vbox.setSpacing(12)
+        outer.addWidget(body, 1)
+
+        # --- quantita' ---
+        row = QHBoxLayout()
+        row.addWidget(QLabel(_("Quanti paper wallet vuoi creare?")))
+        # Menu a tendina invece di uno spinbox: Qt lo disegna in modo
+        # nativo, mentre i tastini su/giu' di uno QSpinBox spariscono non
+        # appena il foglio di stile tocca il widget (per le frecce Qt vuole
+        # un'immagine, e il triangolo fatto coi bordi qui non funziona).
+        self.spin = QComboBox()
+        self.spin.addItems([str(i) for i in range(1, core.MAX_PAPER_WALLETS + 1)])
+        self.spin.setFixedWidth(90)
+        row.addWidget(self.spin)
+
+        # Formato della frase. Solo qui: i fogli degli EREDI restano sempre
+        # BIP39, perche' finiscono in mano ad altri che useranno il
+        # portafoglio che preferiscono loro, e li' la portabilita' non si
+        # negozia. Il paper wallet invece resta di chi lo crea, quindi la
+        # scelta ha senso.
+        row.addSpacing(24)
+        row.addWidget(QLabel(_("Tipo di seed:")))
+        self.kind = QComboBox()
+        self.kind.addItem(_("BIP39 (standard, va in ogni wallet)"),
+                          core.SEED_KIND_BIP39)
+        self.kind.addItem(_("Electrum (più sicuro , solo x Electrum wallet)"),
+                          core.SEED_KIND_ELECTRUM)
+        self.kind.setMinimumWidth(330)
+        self.kind.currentIndexChanged.connect(self._kind_changed)
+        row.addWidget(self.kind)
+        row.addStretch(1)
+        vbox.addLayout(row)
+
+        self.kind_note = QLabel("")
+        self.kind_note.setWordWrap(True)
+        self.kind_note.setStyleSheet(
+            f"color:{TEAL_DARK}; background:{TEAL_TINT}; border-radius:6px; "
+            "padding:9px; font-size:12px;")
+        vbox.addWidget(self.kind_note)
+        self._kind_changed()
+
+        # --- l'avvertenza che conta ---
+        warn = QLabel(_(
+            "I seed di questi paper wallet NON vengono salvati: non finiscono "
+            "nel wallet, non finiscono in un file. Esisteranno solo sui fogli "
+            "che stai per stampare.\n\n"
+            "Finche' questa finestra resta aperta puoi ristampare. Quando la "
+            "chiudi le parole spariscono per sempre: se un foglio e' venuto "
+            "male o lo perdi, i fondi versati a quell'indirizzo non sono piu' "
+            "recuperabili da nessuno.\n\n"
+            "Non versare fondi prima di aver verificato che il foglio sia "
+            "stampato bene e leggibile."))
+        warn.setWordWrap(True)
+        warn.setStyleSheet(
+            f"color:{DANGER}; background:{DANGER_BG}; border:1px solid "
+            f"{DANGER_BD}; border-radius:6px; padding:10px; font-size:12px;")
+        vbox.addWidget(warn)
+
+        note = QLabel(_(
+            "Come per i fogli dei beneficiari: usa una stampante collegata "
+            "direttamente via cavo, mai di rete o condivisa, e stampa "
+            "fronte/retro con giro sul lato lungo."))
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color:{MUTED}; font-size:12px;")
+        vbox.addWidget(note)
+
+        # --- pulsanti ---
+        br = QHBoxLayout()
+        self.b_close = QPushButton(_("Annulla"))
+        self.b_close.clicked.connect(self.reject)
+        br.addWidget(self.b_close)
+        br.addStretch(1)
+        self.b_reprint = QPushButton(_("Ristampa"))
+        self.b_reprint.clicked.connect(self._print)
+        self.b_reprint.setVisible(False)
+        br.addWidget(self.b_reprint)
+        self.b_go = _btc_button(_("Genera e stampa"))
+        self.b_go.setDefault(True)
+        self.b_go.clicked.connect(self._generate_and_print)
+        br.addWidget(self.b_go)
+        vbox.addLayout(br)
+
+        self.status = QLabel("")
+        self.status.setStyleSheet(f"color:{MUTED}; font-size:11.5px;")
+        self.status.setWordWrap(True)
+        vbox.addWidget(self.status)
+
+        _apply_style(self)
+
+    # ------------------------------------------------------------ azioni --
+
+    def _kind_changed(self):
+        """Spiega la scelta mentre la si fa, non dopo.
+
+        Le due opzioni non differiscono per gusto: cambiano cosa dovra' fare
+        chi un giorno riprendera' i fondi, ed e' giusto saperlo prima.
+        """
+        if self.kind.currentData() == core.SEED_KIND_ELECTRUM:
+            self.kind_note.setText(_(
+                "Si ripristina praticamente solo in Electrum, ma senza "
+                "spuntare opzioni e senza digitare alcun percorso di "
+                "derivazione: ci sono meno cose da sbagliare."))
+        else:
+            self.kind_note.setText(_(
+                "Formato standard: si ripristina in quasi tutti i portafogli "
+                "(Electrum, Sparrow, BlueWallet, Ledger, Trezor...). In "
+                "Electrum va spuntata l'opzione BIP39 e va digitato anche il "
+                "percorso di derivazione, che e' stampato sul foglio."))
+
+    def _generate_and_print(self):
+        """Genera i paper wallet (una volta sola) e apre la stampa."""
+        if not self.wallets:
+            n = int(self.spin.currentText())
+            kind = self.kind.currentData()
+            try:
+                self.wallets = core.generate_paper_wallets(n, seed_kind=kind)
+            except Exception as e:
+                _logger.error(f"generazione paper wallet fallita: {e}")
+                QMessageBox.critical(self, _("Easy Heirs"), str(e))
+                return
+            # Generati: la quantita' non si tocca piu', altrimenti i fogli
+            # gia' stampati non corrisponderebbero a quelli in memoria.
+            self.spin.setEnabled(False)
+            self.kind.setEnabled(False)
+            self.b_go.setText(_("Stampa"))
+            self.status.setText(_(
+                "{} paper wallet generati. Sono in memoria: stampali ora."
+            ).format(len(self.wallets)))
+        self._print()
+
+    def _print(self):
+        if not self.wallets:
+            return
+        if not PaperReminderDialog(self, len(self.wallets)).exec():
+            return
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        _setup(printer)
+        printer.setDocName("Easy Heirs — paper wallet")
+        try:
+            printer.setDuplex(QPrinter.DuplexMode.DuplexLongSide)
+        except Exception as e:
+            _logger.info(f"impossibile preimpostare il fronte/retro: {e}")
+        if QPrintDialog(printer, self).exec() != QDialog.DialogCode.Accepted:
+            return
+
+        jobs = []
+        for pw in self.wallets:
+            jobs += _paper_jobs_for(pw)
+        try:
+            _draw(printer, jobs)
+        except Exception as e:
+            _logger.error(f"stampa paper wallet fallita: {e}")
+            QMessageBox.critical(self, _("Errore di stampa"), str(e))
+            return
+
+        self.printed = True
+        self.b_reprint.setVisible(True)
+        self.b_go.setVisible(False)
+        self.b_close.setText(_("Ho verificato: chiudi"))
+        self.status.setText(_(
+            "Controlla i fogli: tutte le parole devono essere stampate e "
+            "leggibili. Se qualcosa non va, premi Ristampa. Chiudendo, le "
+            "parole spariscono."))
+
+    # ----------------------------------------------------------- chiusura --
+
+    def reject(self):
+        """Chiudere significa perdere i seed: chiediamo conferma.
+
+        Solo se non e' stato stampato nulla la chiusura e' innocua (i wallet
+        generati non sono mai finiti su carta, quindi non c'e' nulla da
+        proteggere: si buttano e basta).
+        """
+        if self.wallets and self.printed:
+            if not _ask(self, _("Chiudere?"),
+                        _("Hai controllato che tutti i fogli siano stampati e "
+                          "leggibili?\n\nChiudendo, le parole di recupero "
+                          "vengono dimenticate: non sara' piu' possibile "
+                          "ristamparle.")):
+                return
+        elif self.wallets and not self.printed:
+            if not _ask(self, _("Chiudere senza stampare?"),
+                        _("Hai generato {} paper wallet ma non li hai ancora "
+                          "stampati. Chiudendo vengono buttati via."
+                          ).format(len(self.wallets))):
+                return
+        # Non basta perdere il riferimento: azzeriamo esplicitamente, cosi'
+        # l'intenzione e' leggibile nel codice.
+        self.wallets = []
+        QDialog.reject(self)
+
+
+class PaperReminderDialog(QDialog):
+    """Promemoria prima di mandare in stampa dei paper wallet."""
+
+    def __init__(self, parent, n):
+        QDialog.__init__(self, parent)
+        self.setWindowTitle(_("Prima di stampare"))
+        self.setMinimumWidth(560)
+        vbox = QVBoxLayout(self)
+
+        head = QLabel("⚠  " + _(
+            "Stai per stampare {} paper wallet. Ogni foglio contiene parole "
+            "di recupero e non esiste una seconda copia.").format(n))
+        head.setWordWrap(True)
+        head.setStyleSheet(
+            f"color:{DANGER}; background:{DANGER_BG}; border:1px solid "
+            f"{DANGER_BD}; border-radius:6px; padding:9px; font-size:12px;")
+        vbox.addWidget(head)
+
+        steps = QLabel(_(
+            "1.  Stampante collegata via cavo: mai di rete, mai condivisa, "
+            "mai in copisteria.\n"
+            "2.  Fronte/retro con GIRO SUL LATO LUNGO: la banda scura deve "
+            "finire dietro le parole.\n"
+            "3.  Non allontanarti dalla stampante finche' i fogli non sono "
+            "usciti.\n"
+            "4.  Controlla ogni foglio prima di chiudere questa finestra: "
+            "dopo non si puo' piu' ristampare."))
+        steps.setWordWrap(True)
+        vbox.addWidget(steps)
+
+        row = QHBoxLayout()
+        b = QPushButton(_("Annulla"))
+        b.clicked.connect(self.reject)
+        row.addWidget(b)
+        row.addStretch(1)
+        ok = _primary_button(_("Ho capito, apri la stampa"))
+        ok.setDefault(True)
+        ok.clicked.connect(self.accept)
+        row.addWidget(ok)
+        vbox.addLayout(row)
+        _apply_style(self)
+
+
 class Plugin(BasePlugin):
     """Aggancio a Electrum.
 
@@ -1886,9 +2268,91 @@ class Plugin(BasePlugin):
         BasePlugin.__init__(self, parent, config, name)
         self._wired = set()
         self._wired_windows = []
+        self._stale_warned = False
+        self._stale_scheduled = False
         self._buttons = {}
 
     # ------------------------------------------------------------- hooks --
+
+    def _external_plugin_dir(self):
+        """La cartella dei plugin esterni secondo Electrum stesso, o None.
+
+        E' la fonte piu' attendibile; core sa comunque ricavarla da solo dal
+        percorso di caricamento, ma solo se l'archivio di partenza e' ancora
+        al suo posto.
+        """
+        try:
+            return self.parent.get_external_plugin_dir()
+        except Exception as e:
+            _logger.info(f"cartella dei plugin non ottenibile da Electrum: {e}")
+            return None
+
+    def _schedule_stale_check(self, window):
+        """Programma il controllo della versione subito dopo gli hook.
+
+        Electrum riesegue gli hook appena si installa un aggiornamento
+        (chiama ``reload_windows()``): e' quello il momento in cui ha senso
+        dire di riavviare, perche' e' quando l'utente sta aggiornando.
+        Aspettare l'apertura della nostra finestra non basta -- chi installa e
+        chiude Electrum non vedrebbe mai l'avviso, ed e' esattamente cio' che
+        succedeva.
+
+        Il piccolo ritardo evita di aprire una finestra modale mentre Electrum
+        sta ancora costruendo la propria.
+        """
+        if self._stale_warned or self._stale_scheduled:
+            return
+        self._stale_scheduled = True
+        try:
+            QTimer.singleShot(1500, lambda: self._warn_if_stale(window))
+        except Exception as e:
+            _logger.info(f"controllo della versione non programmato: {e}")
+
+    def _warn_if_stale(self, window):
+        """Avvisa una volta sola se su disco c'e' una versione piu' nuova.
+
+        Sostituire lo ZIP mentre Electrum e' aperto non basta: Python
+        continua a usare i moduli gia' importati. Senza questo avviso si
+        starebbe usando il plugin vecchio credendo di usare quello nuovo, ed
+        e' il tipo di equivoco che fa perdere tempo (o peggio, fa pensare che
+        una correzione non funzioni).
+        """
+        # Il controllo e' finito: un'altra tornata di hook (per esempio dopo
+        # l'installazione di un aggiornamento, piu' tardi nella stessa
+        # sessione) potra' programmarne un altro.
+        self._stale_scheduled = False
+        if self._stale_warned:
+            return
+        try:
+            # Fra la programmazione e lo scatto la finestra puo' essere stata
+            # chiusa: usarla allora farebbe cadere il plugin. Senza padre il
+            # messaggio si mostra lo stesso.
+            window.isVisible()
+        except Exception:
+            window = None
+        try:
+            disk = core.stale_version(self._external_plugin_dir())
+        except Exception as e:
+            _logger.info(f"controllo della versione non riuscito: {e}")
+            return
+        # Tracciato sempre, anche quando va tutto bene: quando questo avviso
+        # non compare, il log e' l'unico modo per sapere se il controllo ha
+        # girato e che cosa ha visto.
+        _logger.info(f"versione in esecuzione {core.RUNNING_VERSION}, "
+                     f"su disco {disk or 'nessuna diversa'}")
+        if not disk:
+            return
+        self._stale_warned = True
+        # Finestra standard di Electrum, col suo triangolo di avvertimento:
+        # qui conta il richiamo d'attenzione, non il marchio.
+        QMessageBox.warning(
+            window, _("Easy Heirs") + " \u2014 " + _("riavvia Electrum"),
+            _("Hai installato la versione {new} del plugin, ma Electrum sta "
+              "ancora usando la {old}: i moduli gia' caricati restano in "
+              "memoria finche' il programma non viene chiuso.\n\n"
+              "Chiudi e riapri Electrum prima di usare il plugin, altrimenti "
+              "stai lavorando con la versione precedente."
+              ).format(new=disk, old=core.RUNNING_VERSION))
 
     @hook
     def init_qt(self, gui_object):
@@ -1896,6 +2360,7 @@ class Plugin(BasePlugin):
         try:
             for window in list(getattr(gui_object, "windows", []) or []):
                 self._wire(window)
+                self._schedule_stale_check(window)
         except Exception as e:
             _logger.error(f"init_qt fallito: {e}")
 
@@ -1903,11 +2368,13 @@ class Plugin(BasePlugin):
     def init_menubar(self, window):
         _logger.info("hook init_menubar")
         self._wire(window)
+        self._schedule_stale_check(window)
 
     @hook
     def load_wallet(self, wallet, window):
         _logger.info("hook load_wallet")
         self._wire(window)
+        self._schedule_stale_check(window)
 
     @hook
     def create_status_bar(self, sb):
@@ -2012,6 +2479,7 @@ class Plugin(BasePlugin):
     # ---------------------------------------------------------- apertura --
 
     def open_main(self, window):
+        self._warn_if_stale(window)
         if getattr(window, "wallet", None) is None:
             QMessageBox.information(window, _("Easy Heirs"),
                                     _("Nessun wallet aperto."))

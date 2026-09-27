@@ -24,6 +24,24 @@ Easy Heirs lets you generate a printable, fold-in-three A4 sheet for each benefi
 2. In Electrum, go to **Tools → Plugins → Load plugin from ZIP** (or place the extracted `bal_easy_heirs` folder in Electrum's `plugins` directory).
 3. Enable **Easy Heirs** from the plugin list.
 
+**You do not need to restart Electrum.** On enabling a plugin Electrum calls
+`reload_windows()`, which re-runs the hooks this plugin uses, so the menu
+entries and the status-bar icon appear straight away in the windows you
+already have open.
+
+The one case that *does* need a restart is **replacing an already-installed
+ZIP with a newer one** — which in practice only happens while developing.
+That is a Python limitation, not an Electrum one: once a module has been
+imported it stays in `sys.modules`, and `zipimport` also caches the archive
+index, so dropping in a new ZIP of the same name leaves the old code running.
+
+It can be forced (purging our entries from `sys.modules` and clearing the
+zipimport cache on disable) and we deliberately do not, because Qt objects
+built by the old classes stay alive alongside new ones from the reloaded
+code. That mostly works and occasionally produces a hybrid state that is very
+hard to diagnose. On a plugin that handles seed phrases, a restart is a much
+better trade than a puzzling bug.
+
 ## Verify your download
 
 Every release is published with a SHA-256 checksum and a GPG signature, so

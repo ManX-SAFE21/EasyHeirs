@@ -25,6 +25,7 @@ own key and passphrase; see RELEASING.md.
 """
 
 import hashlib
+import json
 import os
 import zipfile
 
@@ -109,8 +110,36 @@ def sha256_of(path: str) -> str:
     return h.hexdigest()
 
 
+def check_versions_agree(version: str) -> None:
+    """VERSION, manifest.json and core.RUNNING_VERSION must all agree.
+
+    RUNNING_VERSION is what tells the user that Electrum is still running the
+    previous code. If it lagged behind the manifest, the plugin would raise
+    that warning on every single start, for no reason — better to stop the
+    build than to ship a warning nobody can act on.
+    """
+    import re
+    mf = os.path.join(PKG_DIR, "manifest.json")
+    with open(mf, "r", encoding="utf-8") as fh:
+        manifest_version = json.load(fh).get("version")
+    with open(os.path.join(PKG_DIR, "core.py"), "r", encoding="utf-8") as fh:
+        m = re.search(r'^RUNNING_VERSION = "([^"]+)"', fh.read(), re.M)
+    running = m.group(1) if m else None
+
+    problems = []
+    if manifest_version != version:
+        problems.append(f"manifest.json says {manifest_version!r}")
+    if running != version:
+        problems.append(f"core.RUNNING_VERSION says {running!r}")
+    if problems:
+        raise SystemExit(
+            f"Version mismatch (VERSION says {version!r}): "
+            + "; ".join(problems))
+
+
 def main() -> None:
     version = read_version()
+    check_versions_agree(version)
     os.makedirs(DIST_DIR, exist_ok=True)
     base = f"bal_easy_heirs_v{version}.zip"
     zip_path = os.path.join(DIST_DIR, base)
