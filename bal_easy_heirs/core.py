@@ -100,7 +100,7 @@ LOCKTIME_IS_TIME = 500_000_000
 # dell'import, perche' serve proprio a confrontarla con quella dichiarata dal
 # file su disco. scripts/build_release.py verifica che coincida con il
 # manifest a ogni build, cosi' non puo' restare indietro per distrazione.
-RUNNING_VERSION = "0.9.9"
+RUNNING_VERSION = "1.0.12"
 
 
 PLUGIN_NAME = "bal_easy_heirs"   # il campo "name" del manifest, come lo usa Electrum
@@ -570,7 +570,7 @@ def read_bal_heirs(wallet) -> dict:
     """{nome: {address, amount, locktime}}. Non modifica nulla."""
     out = {}
     try:
-        raw = wallet.db.get(BAL_HEIRS_KEY, {}) or {}
+        raw = read_heirs_raw(wallet)
     except Exception as e:
         _logger.error(f"lettura lista BAL fallita: {e}")
         return out
@@ -583,6 +583,38 @@ def read_bal_heirs(wallet) -> dict:
             _logger.info(f"voce non interpretabile, saltata: {name!r}")
             out[name] = {"address": None, "amount": None, "locktime": None}
     return out
+
+
+def _plain(value):
+    """Copia "nuda" di un valore letto dal wallet: solo dict, list e scalari.
+
+    Electrum non restituisce dizionari e liste normali: li avvolge in
+    ``StoredDict`` / ``StoredList``, che tengono un riferimento al database --
+    e quindi al suo lock. Ogni lista annidata viene convertita cosi', sempre,
+    a prescindere dalle chiavi registrate.
+
+    Il guaio salta fuori solo quando si RISCRIVE: ``db.put`` fa una copia
+    profonda del valore, che su un lock non e' possibile, e fallisce con
+    "cannot pickle '_thread.RLock' object". Per noi significava non riuscire
+    piu' ad aggiungere un beneficiario appena nella lista ce n'era gia' uno.
+
+    Le tuple diventano liste: e' quello che erano gia' una volta salvate in
+    JSON, quindi sul file non cambia nulla.
+    """
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
+
+
+def read_heirs_raw(wallet) -> dict:
+    """La lista eredi di BAL, gia' ridotta a strutture riscrivibili.
+
+    Unico punto da cui leggerla quando poi la si rimette nel wallet: cosi' la
+    conversione non puo' essere dimenticata in uno dei rami.
+    """
+    return _plain(wallet.db.get(BAL_HEIRS_KEY, {}) or {})
 
 
 def _as_percent(amount) -> float:
@@ -620,6 +652,57 @@ def _existing_percent(wallet):
     return existing_pct, has_fixed
 
 
+# Perche' non c'e' nulla da suggerire. La finestra di creazione li usa per
+# spiegarlo: sono gli stessi casi in cui le caselle restano vuote, e senza
+# spiegazione sembrano un guasto del programma.
+NO_ROOM_FIXED = "fixed"   # un erede esistente ha un importo fisso
+NO_ROOM_FULL = "full"     # il 100% risulta gia' tutto assegnato
+
+
+def share_state(wallet, manual: list) -> dict:
+    """La situazione delle quote: quanto e' gia' assegnato e quanto resta.
+
+    Una sola fonte per due usi -- calcolare i suggerimenti e spiegarli --
+    perche' la stessa formula scritta in due posti prima o poi diverge, e a
+    divergere sarebbe proprio la frase che dice all'utente perche' le caselle
+    sono vuote.
+
+    Chiavi ritornate:
+      ``existing_pct``  quote percentuali gia' assegnate in BAL;
+      ``manual_pct``    quote percentuali scritte a mano nelle righe nuove;
+      ``remaining``     il resto da distribuire (mai negativo);
+      ``each``          quanto toccherebbe a ogni riga automatica, arrotondato;
+      ``free``          indici delle righe da riempire in automatico;
+      ``has_fixed``     un erede esistente usa un importo fisso;
+      ``reason``        None, oppure NO_ROOM_FIXED / NO_ROOM_FULL.
+    """
+    existing_pct, has_fixed = _existing_percent(wallet)
+
+    # Le quote manuali che NON sono percentuali (es. un importo fisso digitato
+    # a mano) non entrano nel conteggio del resto: non si sommano al 100%.
+    manual_pct = 0.0
+    for m in manual:
+        p = _as_percent(m)
+        if p is not None:
+            manual_pct += p
+
+    free = [i for i, m in enumerate(manual) if m is None]
+    remaining = max(0.0, 100.0 - existing_pct - manual_pct)
+    each = round(remaining / len(free), 2) if free else 0.0
+
+    reason = None
+    if has_fixed:
+        reason = NO_ROOM_FIXED
+    elif free and each <= 0:
+        # Il confronto e' sul valore ARROTONDATO, lo stesso che finirebbe
+        # nella casella: se scriveremmo "0%", non c'e' quota da proporre.
+        reason = NO_ROOM_FULL
+
+    return {"existing_pct": existing_pct, "manual_pct": manual_pct,
+            "remaining": remaining, "each": each, "free": free,
+            "has_fixed": has_fixed, "reason": reason}
+
+
 def suggest_shares(wallet, manual: list) -> list:
     """Quote suggerite per una lista di nuovi beneficiari, RISPETTANDO quelle
     gia' scritte a mano.
@@ -638,34 +721,31 @@ def suggest_shares(wallet, manual: list) -> list:
     ribilanciano da sole (5 eredi -> 20% a testa; ne togli uno -> 25% a testa),
     mentre una quota scritta a mano non viene mai sovrascritta.
 
-    Se qualche erede esistente in BAL usa un importo FISSO, non si puo'
-    calcolare un "resto in percentuale" pulito: in quel caso le righe
-    automatiche restano vuote (``""``) e decide l'utente.
+    Quando non c'e' un resto da distribuire le righe automatiche restano
+    VUOTE (``""``) invece di ricevere ``"0%"``. Due casi:
+
+      * un erede gia' presente in BAL usa un importo FISSO, e allora un
+        "resto in percentuale" pulito non esiste;
+      * il 100% risulta gia' assegnato fra eredi esistenti e quote scritte
+        a mano.
+
+    Una casella vuota ha un seguito sensato (l'erede si crea con l'importo
+    segnaposto, da correggere poi in BAL), mentre ``"0%"`` verrebbe respinto
+    dalla validazione come quota non valida: il plugin rifiuterebbe un valore
+    scritto da lui stesso. Il motivo viene mostrato dalla finestra di
+    creazione, che lo chiede a ``share_state``.
     """
     n = len(manual)
     if n <= 0:
         return []
 
-    existing_pct, has_fixed = _existing_percent(wallet)
-    if has_fixed:
-        # Nessun suggerimento: teniamo il manuale, le auto restano vuote.
-        return [m if m is not None else "" for m in manual]
-
-    # Quote manuali valide espresse in percentuale (le altre, es. importi fissi
-    # digitati a mano, non entrano nel conteggio del resto).
-    manual_pct = 0.0
-    for m in manual:
-        p = _as_percent(m)
-        if p is not None:
-            manual_pct += p
-
-    free_idx = [i for i, m in enumerate(manual) if m is None]
+    st = share_state(wallet, manual)
+    free_idx = st["free"]
     out = [m if m is not None else "" for m in manual]
-    if not free_idx:
+    if st["reason"] or not free_idx:
         return out
 
-    remaining = max(0.0, 100.0 - existing_pct - manual_pct)
-    each = round(remaining / len(free_idx), 2)
+    remaining, each = st["remaining"], st["each"]
     for i in free_idx:
         out[i] = f"{each:g}%"
     # l'ultima riga automatica assorbe lo scarto di arrotondamento, cosi' la
@@ -698,28 +778,16 @@ def suggest_equal_shares(wallet, n_new: int) -> list:
 
     Ritorna una lista di ``n_new`` stringhe (es. "30%") oppure di stringhe
     vuote se non e' stato possibile suggerire nulla.
+
+    Oggi nessuno la chiama: la finestra di creazione usa ``suggest_shares``,
+    che rispetta anche le quote gia' scritte a mano. Resta qui come caso
+    particolare di quella (nessuna riga manuale) e le delega il calcolo,
+    invece di tenerne una seconda copia: due formule uguali scritte in due
+    punti prima o poi smettono di esserlo.
     """
     if n_new <= 0:
         return []
-
-    existing_pct, has_fixed = _existing_percent(wallet)
-
-    if has_fixed:
-        _logger.info("eredi esistenti con importo fisso: nessuna quota "
-                     "suggerita automaticamente")
-        return [""] * n_new
-
-    remaining = max(0.0, 100.0 - existing_pct)
-    each = round(remaining / n_new, 2)
-    shares = [f"{each:g}%" for _ in range(n_new)]
-
-    # l'ultima riga assorbe lo scarto di arrotondamento, cosi' la somma
-    # combacia esattamente con "remaining" invece di finire a 99.98% per
-    # via degli arrotondamenti dei singoli valori
-    assigned = each * (n_new - 1)
-    last = round(remaining - assigned, 2)
-    shares[-1] = f"{last:g}%"
-    return shares
+    return suggest_shares(wallet, [None] * n_new)
 
 
 def format_share(amount) -> str:
@@ -792,7 +860,7 @@ def read_will_info(wallet) -> dict:
     """
     out = {}
     try:
-        will = wallet.db.get(BAL_WILL_KEY, {}) or {}
+        will = _plain(wallet.db.get(BAL_WILL_KEY, {}) or {})
         items = will.items() if hasattr(will, "items") else []
     except Exception as e:
         _logger.info(f"will non leggibile: {e}")
@@ -843,10 +911,12 @@ def _registry(wallet) -> dict:
         d = None
     if not isinstance(d, dict):
         return {"version": REGISTRY_VERSION, "entries": []}
+    # _plain e non dict(): una copia superficiale lascerebbe dentro gli
+    # oggetti di Electrum, che poi non si riescono a riscrivere.
+    d = _plain(d)
     entries = d.get("entries")
     return {"version": d.get("version", REGISTRY_VERSION),
-            "entries": [dict(e) for e in entries] if isinstance(entries, list)
-            else []}
+            "entries": entries if isinstance(entries, list) else []}
 
 
 def _persist(wallet) -> bool:
@@ -942,7 +1012,7 @@ def add_generated(wallet, name: str, address: str, xpub: str, mnemonic: str,
     if not bitcoin.is_address(address, net=constants.net):
         raise EasyHeirsError(f"indirizzo non valido su questa rete: {address}")
 
-    heirs = dict(wallet.db.get(BAL_HEIRS_KEY, {}) or {})
+    heirs = read_heirs_raw(wallet)
     if name in heirs:
         raise DuplicateName(f"esiste gia' un beneficiario di nome {name!r}")
 
@@ -977,7 +1047,7 @@ def add_provided(wallet, name: str, address: str,
     if not bitcoin.is_address(address, net=constants.net):
         raise EasyHeirsError(f"indirizzo non valido su questa rete: {address}")
 
-    heirs = dict(wallet.db.get(BAL_HEIRS_KEY, {}) or {})
+    heirs = read_heirs_raw(wallet)
     if name in heirs:
         raise DuplicateName(f"esiste gia' un beneficiario di nome {name!r}")
     if locktime is None:
@@ -1006,7 +1076,7 @@ def delete_beneficiary(wallet, name: str, delete_seed: bool = False) -> dict:
     result = {"removed_from_list": False, "seed_deleted": False,
               "address": None}
 
-    heirs = dict(wallet.db.get(BAL_HEIRS_KEY, {}) or {})
+    heirs = read_heirs_raw(wallet)
     addr = None
     if name in heirs:
         try:
@@ -1045,7 +1115,7 @@ def set_heir_amount(wallet, name: str, amount) -> None:
     torna al segnaposto (come alla creazione). Non tocca il seed ne' il
     registro: cambia solo il campo quota della voce ``heirs`` di BAL.
     """
-    heirs = dict(wallet.db.get(BAL_HEIRS_KEY, {}) or {})
+    heirs = read_heirs_raw(wallet)
     if name not in heirs:
         raise EasyHeirsError(f"beneficiario non trovato: {name!r}")
     v = heirs[name]
@@ -1151,7 +1221,7 @@ def export_heirs_to_bal_json(wallet, path: str) -> int:
     Ritorna il numero di eredi scritti. Non modifica nulla nel wallet.
     """
     try:
-        raw = wallet.db.get(BAL_HEIRS_KEY, {}) or {}
+        raw = read_heirs_raw(wallet)
     except Exception as e:
         raise EasyHeirsError(f"lettura lista eredi fallita: {e}")
 

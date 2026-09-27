@@ -12,7 +12,32 @@ Easy Heirs lets you generate a printable, fold-in-three A4 sheet for each benefi
 - Remove a beneficiary, with an optional safety-gated seed deletion
 - Export the beneficiary list to JSON for import into BAL
 - Printable, styled A4 sheets matching the SAFE21 brand
+- Print paper wallets: brand-new wallets to fund later, in BIP39 or Electrum's own seed format
 - No internet connection required to generate seeds — no payment, no unlock step
+
+## Paper wallets
+
+Besides the heir sheets, Easy Heirs can print up to 20 **paper wallets** at a
+time: fresh wallets, generated offline, meant to be printed first and funded
+afterwards by sending coins to the address on the sheet. They are not
+beneficiaries and never enter BAL's heir list.
+
+Their seeds are **never stored** — not in the wallet file, not in a file of
+their own. They exist in memory while the dialog is open and on paper after
+that, so a lost or badly printed sheet means the funds sent to it are
+unrecoverable. The dialog lets you reprint until you close it, and asks for
+confirmation before discarding the words.
+
+Each sheet can use **BIP39** (the default: restorable in almost any wallet,
+but you must also type the derivation path, which is printed on the sheet) or
+**Electrum's native format** (restorable essentially only in Electrum, with no
+options to tick and no path to type — fewer things to get wrong). Beneficiary
+sheets are always BIP39: they end up in someone else's hands.
+
+The back of every paper wallet states how the key was generated — entropy
+source and size, and whether the independent BIP39 reference check ran — so
+the holder does not have to take anyone's word for it. See
+[SECURITY.md](SECURITY.md) for the full threat model.
 
 ## Requirements
 

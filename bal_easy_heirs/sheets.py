@@ -224,13 +224,37 @@ def qr_image(data, scale=6):
 EXPLORER = "mempool.space"
 
 
+# Logo di BAL - Bitcoin After Life, in alto a sinistra sui fogli dei
+# beneficiari: sono documenti che qualcuno ritrovera' fra anni, e il marchio
+# dice a colpo d'occhio a quale progetto appartengono. Sta nello spazio
+# bianco a sinistra del titolo, che e' centrato: non si tocca nulla d'altro.
+BAL_LOGO_FILE = "bal-logo.png"
+BAL_LOGO_W = 20.0        # mm; il logo e' quadrato
+BAL_LOGO_Y = 1.5
+BAL_BAR_GAP = 4.0        # stacco fra il logo e l'inizio della banda verde
+
+
 def _header(s, title, name, subtitle=""):
-    s.fill(0, 0, PAGE_W, 3.5, C_ACC)
+    """Testata: logo BAL a sinistra, titolo e nome centrati.
+
+    La banda verde non parte dal bordo del foglio ma DOPO il logo: cosi' il
+    marchio sta nel suo spazio bianco invece di sembrare appiccicato alla
+    banda. Se il logo non si carica la banda riprende l'intera larghezza,
+    perche' un rientro senza nulla dentro sembrerebbe un errore di stampa.
+    """
+    logo_bottom = _draw_image(s, BAL_LOGO_FILE, MARGIN, BAL_LOGO_Y, BAL_LOGO_W)
+    bar_x = 0.0 if logo_bottom == BAL_LOGO_Y else MARGIN + BAL_LOGO_W + BAL_BAR_GAP
+    # A destra la banda finisce dove finiscono le righe del foglio, non al
+    # bordo della carta: allineata alle linee sotto sembra parte della stessa
+    # griglia, mentre arrivando al taglio sembrava un fondino a se'.
+    s.fill(bar_x, 0, PAGE_W - MARGIN - bar_x, 3.5, C_ACC)
     s.centred(PAGE_W / 2, 9.5, title, C_ACC_D, size=7.5, bold=True)
     y = s.centred(PAGE_W / 2, 15, name, C_INK, size=19, bold=True)
     if subtitle:
         y = s.centred(PAGE_W / 2, y + 1.5, subtitle, C_MUTED, size=8)
-    return y + 3
+    # Il logo e' piu' alto del blocco di testo: chi viene dopo deve saperlo,
+    # altrimenti la prima riga di contenuto gli finisce sopra.
+    return max(y + 3, logo_bottom + 2.5)
 
 
 def _address_block(s, y, address, xpub=""):
@@ -410,9 +434,26 @@ def _protection_band(s):
 # sforzo, magari da una persona anziana e in un momento difficile.
 WORDS_SIZE = 15.75
 
+# Numero progressivo accanto a ogni parola: 13 = 6.5 x 2, come chiesto dal
+# titolare. Serve a ricopiare la frase nell'ordine giusto.
+NUM_SIZE = 13.0
+
 # Sotto questa quota molte stampanti non stampano affatto: e' il margine di
 # sicurezza in fondo al foglio, non un margine estetico.
 BOTTOM_SAFE = 6.0
+
+
+def _num_gutter(s, n_words):
+    """Larghezza della colonnina dei numeri, a sinistra di ogni casella.
+
+    I numeri stanno FUORI dal riquadro: dentro rubavano spazio alla parola e,
+    con il corpo raddoppiato, le finivano quasi addosso. La colonnina si
+    dimensiona sul numero piu' largo che dovra' contenere (24 con una frase
+    lunga, 12 con quella corta), misurato e non indovinato.
+    """
+    widest = str(max(n_words, 1))
+    w = s.to_mm(s.metrics(s.font(NUM_SIZE, bold=False)).horizontalAdvance(widest))
+    return w + 2.6          # il numero, piu' l'aria fra numero e riquadro
 
 
 def _words_grid(s, words, top, bottom_limit=None, size=WORDS_SIZE):
@@ -420,6 +461,10 @@ def _words_grid(s, words, top, bottom_limit=None, size=WORDS_SIZE):
 
     Condivisa fra il foglio dell'erede e il paper wallet: e' la parte piu'
     delicata della stampa, quindi ha senso che esista in un solo posto.
+
+    Ogni parola sta in un riquadro, con il suo numero d'ordine fuori a
+    sinistra, allineato a destra contro il riquadro: cosi' le cifre formano
+    una colonna leggibile e il riquadro resta tutto per la parola.
 
     12 parole -> 3 colonne, caselle larghe e molto leggibili. 24 parole -> 4
     colonne: con 3 servirebbero 8 righe e si finirebbe sotto il bordo
@@ -435,6 +480,10 @@ def _words_grid(s, words, top, bottom_limit=None, size=WORDS_SIZE):
     rows = (len(words) + cols - 1) // cols
     bw = (PAGE_W - 2 * MARGIN) / cols
 
+    gutter = _num_gutter(s, len(words))
+    box_w = bw - gutter - 2          # il riquadro, stretto per fare posto
+    pad_x = 3.0                      # respiro fra bordo del riquadro e parola
+
     def box_height(sz):
         """Riga di testo piu' il respiro sopra e sotto."""
         return s.to_mm(s.metrics(s.font(sz, bold=True, mono=True)).height()) + 4.8
@@ -444,19 +493,41 @@ def _words_grid(s, words, top, bottom_limit=None, size=WORDS_SIZE):
         size -= 0.25
         bh = box_height(size)
 
+    # Non deve sforare nemmeno in LARGHEZZA: le parole BIP39 arrivano a otto
+    # lettere e il riquadro ora e' piu' stretto. Il controllo e' sulla parola
+    # piu' lunga che stiamo davvero stampando, non su un caso ipotetico.
+    longest = max(words, key=len) if words else ""
+    while size > 8.0 and longest:
+        room = box_w - 2 * pad_x
+        if s.to_mm(s.metrics(s.font(size, bold=True,
+                                    mono=True)).horizontalAdvance(longest)) <= room:
+            break
+        size -= 0.25
+        bh = box_height(size)
+
     f = s.font(size, bold=True, mono=True)
     lh = s.to_mm(s.metrics(f).height())
     pad = max(1.6, (bh - 2 - lh) / 2)      # centra la parola nella casella
+
+    fnum = s.font(NUM_SIZE, bold=False)
+    lnum = s.to_mm(s.metrics(fnum).height())
+    # Numero e parola sulla stessa linea ottica, pur avendo corpi diversi.
+    num_dy = pad + (lh - lnum) / 2
+
     for i, word in enumerate(words):
         r, c = divmod(i, cols)
         bx = MARGIN + c * bw
         byy = top + r * bh
-        s.box(bx + 1, byy, bw - 2, bh - 2, C_RULE, 0.35)
-        s.text(bx + 3, byy + 1.0, str(i + 1), C_MUTED, size=6.5)
+        s.box(bx + gutter, byy, box_w, bh - 2, C_RULE, 0.35)
+        # Numero allineato a DESTRA contro il riquadro: unita' e decine
+        # restano incolonnate invece di ballare a seconda delle cifre.
+        label = str(i + 1)
+        nw = s.to_mm(s.metrics(fnum).horizontalAdvance(label))
+        s.text(bx + gutter - 2.0 - nw, byy + num_dy, label, C_MUTED, font=fnum)
         # Parole in verde scuro invece che in nero: restano ben leggibili ma
         # trasparono molto meno se qualcuno illumina il foglio piegato da
         # dietro con una luce forte (il verde e' meno denso del nero).
-        s.text(bx + 9, byy + pad, word, C_ACC_D, font=f)
+        s.text(bx + gutter + pad_x, byy + pad, word, C_ACC_D, font=f)
     return top + rows * bh
 
 
@@ -586,6 +657,22 @@ SEC_B = [
 ]
 
 
+# Aria sotto la piega prima di ricominciare a scrivere: la riga di piega e'
+# anche il punto in cui la carta si incurva, e un testo che le sta appiccicato
+# si legge male.
+FOLD_GAP = 5.0
+
+
+def _start_below_fold(y, fold=FOLD1):
+    """L'inizio del prossimo blocco, mai a cavallo della piega.
+
+    A foglio piegato ogni terzo e' una facciata a se': un paragrafo tagliato
+    in due dalla piega risulta illeggibile proprio nel mezzo. Meglio un po'
+    di bianco sopra la piega e il blocco che riparte intero sotto.
+    """
+    return max(y, fold + FOLD_GAP)
+
+
 def _section(s, y, w, letter, title, items, color):
     y = s.text(MARGIN, y, f"{letter}.   {title}", color, size=9.5,
                bold=True) + 2
@@ -618,7 +705,8 @@ def render_seed_back(s, has_seed=True):
                   "allora non serve fare nulla.", C_MUTED, size=7.6) + 3
 
     y = _section(s, y, w, "A", "CON QUALE PROGRAMMA", SEC_A, C_ACC_D)
-    y = _section(s, y, w, "B", "SE SCEGLI ELECTRUM", SEC_B, C_ACC_D)
+    y = _section(s, _start_below_fold(y), w, "B", "SE SCEGLI ELECTRUM",
+                 SEC_B, C_ACC_D)
 
     # --- C: vale per qualunque wallet, quindi sta fuori dalla sezione B ---
     y = s.text(MARGIN, y, "C.   VERIFICA FINALE  -  CON QUALUNQUE PROGRAMMA",
@@ -884,30 +972,31 @@ def render_report(s, wallet_name, rows, page=1, per_page=9):
 LOGO_FILE = "safe21-logo-light.png"
 SITE_URL = "safe21.io"
 
-# QImage del logo, caricata una volta sola (None se non disponibile).
-_LOGO_CACHE = []
+# Immagini gia' caricate, per nome di file (il valore e' None se il file non
+# c'e' o non si legge: cosi' non si riprova a ogni pagina).
+_IMAGE_CACHE = {}
 
 
-def _logo_image():
-    """Il logo SAFE21 come QImage, oppure None se non si riesce a caricarlo.
+def _image(filename):
+    """Un'immagine del pacchetto come QImage, oppure None.
 
-    Letto con pkgutil.get_data e non con open(): il plugin gira dentro uno ZIP
+    Letta con pkgutil.get_data e non con open(): il plugin gira dentro uno ZIP
     (zipimport) e un percorso su disco semplicemente non esiste. Il ripiego su
     open() serve solo quando si lavora sui sorgenti scompattati.
     """
-    if _LOGO_CACHE:
-        return _LOGO_CACHE[0]
+    if filename in _IMAGE_CACHE:
+        return _IMAGE_CACHE[filename]
     data = None
     pkg = __name__.rsplit(".", 1)[0] if "." in __name__ else None
     if pkg:
         try:
-            data = pkgutil.get_data(pkg, LOGO_FILE)
+            data = pkgutil.get_data(pkg, filename)
         except Exception:
             data = None
     if data is None:
         try:
             here = os.path.dirname(os.path.abspath(__file__))
-            with open(os.path.join(here, LOGO_FILE), "rb") as fh:
+            with open(os.path.join(here, filename), "rb") as fh:
                 data = fh.read()
         except Exception:
             data = None
@@ -916,23 +1005,40 @@ def _logo_image():
         candidate = QImage()
         if candidate.loadFromData(data):
             img = candidate
-    _LOGO_CACHE.append(img)
+    _IMAGE_CACHE[filename] = img
     return img
 
 
+def _logo_image():
+    """Il logo SAFE21 (usato sui paper wallet)."""
+    return _image(LOGO_FILE)
+
+
+def _draw_image(s, filename, x, y, w_mm):
+    """Disegna un'immagine larga ``w_mm`` mantenendone le proporzioni.
+
+    Ritorna la y sotto l'immagine, oppure ``y`` se non c'era nulla da
+    disegnare: chi chiama decide se quello spazio serviva ad altro.
+    """
+    img = _image(filename)
+    if img is None or img.isNull() or not img.width():
+        return y
+    h_mm = w_mm * img.height() / float(img.width())
+    s.p.drawImage(QRectF(s.mm(x), s.mm(y), s.mm(w_mm), s.mm(h_mm)), img)
+    return y + h_mm
+
+
 def _draw_logo(s, x, y, w_mm):
-    """Disegna il logo mantenendo le proporzioni. Ritorna la y sotto il logo.
+    """Il logo SAFE21. Ritorna la y sotto il logo.
 
     Se il file mancasse non lasciamo un buco: scriviamo il nome. Un foglio
     senza logo resta valido, un foglio a meta' no.
     """
-    img = _logo_image()
-    if img is None or img.isNull():
+    below = _draw_image(s, LOGO_FILE, x, y, w_mm)
+    if below == y:
         s.text(x, y, "SAFE21", C_ACC_D, size=15, bold=True)
         return y + 7.5
-    h_mm = w_mm * img.height() / float(img.width())
-    s.p.drawImage(QRectF(s.mm(x), s.mm(y), s.mm(w_mm), s.mm(h_mm)), img)
-    return y + h_mm
+    return below
 
 
 STEPS_PAPER = [
@@ -1098,14 +1204,16 @@ def render_paper_back(s, d=None):
               "·   PIEGA IN TRE LUNGO I SEGNI",
               C_MUTED, size=8, bold=True)
 
-    ly = _draw_logo(s, MARGIN, 17, 34.0)
-    s.text(MARGIN, ly + 1.2, SITE_URL, C_ACC_D, size=8, bold=True)
-
+    # Niente logo e niente indirizzo del sito qui: stanno sul FRONTE, che e'
+    # la faccia che identifica il documento. Ripeterli sul retro rubava
+    # quattordici millimetri alle istruzioni, che sono l'unica cosa per cui
+    # questa facciata esiste -- ed erano proprio i millimetri che a volte
+    # facevano saltare la nota sulla generazione della chiave.
     d = d or {}
     is_electrum = d.get("seed_kind") == "electrum"
 
     w = PAGE_W - 2 * MARGIN
-    y = ly + 10
+    y = 20.0
     y = s.text(MARGIN, y, "COME RIPRENDERE I FONDI", C_ACC_D,
                size=12, bold=True) + 1.5
     y = s.wrapped(MARGIN, y, w,
@@ -1116,11 +1224,12 @@ def render_paper_back(s, d=None):
     if is_electrum:
         y = _section(s, y, w, "A", "CON QUALE PROGRAMMA", SEC_A_ELECTRUM,
                      C_ACC_D)
-        y = _section(s, y, w, "B", "COME SI RIPRISTINA", SEC_B_ELECTRUM,
-                     C_ACC_D)
+        y = _section(s, _start_below_fold(y), w, "B", "COME SI RIPRISTINA",
+                     SEC_B_ELECTRUM, C_ACC_D)
     else:
         y = _section(s, y, w, "A", "CON QUALE PROGRAMMA", SEC_A, C_ACC_D)
-        y = _section(s, y, w, "B", "SE SCEGLI ELECTRUM", SEC_B, C_ACC_D)
+        y = _section(s, _start_below_fold(y), w, "B", "SE SCEGLI ELECTRUM",
+                     SEC_B, C_ACC_D)
 
     y = s.text(MARGIN, y, "C.   VERIFICA FINALE  -  CON QUALUNQUE PROGRAMMA",
                C_ALERT, size=9.5, bold=True) + 2

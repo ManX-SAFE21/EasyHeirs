@@ -28,7 +28,8 @@ from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QComboBox, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QComboBox, QScrollArea, QSizePolicy, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from electrum.i18n import _
@@ -504,6 +505,16 @@ class CreateDialog(QDialog):
         share_note.setStyleSheet(f"color:{MUTED}; font-size:12px;")
         vbox.addWidget(share_note)
 
+        # Compare solo quando non c'e' quota da proporre: e' l'unica cosa che
+        # spiega delle caselle vuote che altrimenti sembrano un difetto.
+        self.quota_note = QLabel("")
+        self.quota_note.setWordWrap(True)
+        self.quota_note.setVisible(False)
+        self.quota_note.setStyleSheet(
+            f"color:{TEAL_DARK}; background:{TEAL_TINT}; border-radius:6px; "
+            "padding:9px; font-size:12px;")
+        vbox.addWidget(self.quota_note)
+
         self.err = QLabel("")
         self.err.setWordWrap(True)
         self.err.setStyleSheet(f"color:{DANGER}; font-size:12px;")
@@ -531,6 +542,9 @@ class CreateDialog(QDialog):
         _apply_style(self)
         self._add_row()          # si parte con una riga
         self._recompute()
+        # Dopo lo stile: e' il foglio di stile a dare ai campi il padding che
+        # decide quanto devono essere alte le righe.
+        self._fit_rows()
 
     # ----------------------------------------------------------------- ui --
 
@@ -571,6 +585,23 @@ class CreateDialog(QDialog):
         xb.setCursor(Qt.CursorShape.PointingHandCursor)
         xb.clicked.connect(lambda _c=False, marker=e_name: self._del_row(marker))
         self.table.setCellWidget(i, self.C_DEL, xb)
+        self._fit_rows()
+
+    def _fit_rows(self):
+        """Alza le righe quanto serve ai campi di testo che contengono.
+
+        L'altezza predefinita di riga di Qt non tiene conto del padding che il
+        foglio di stile da' ai QLineEdit: il campo veniva ritagliato in basso e
+        le lettere con la coda (p, g, q, y) sparivano a meta'. La misura la
+        chiediamo al campo stesso invece di fissarla a mano, cosi' regge anche
+        con un altro font o un'altra densita' di schermo.
+        """
+        for r in range(self.table.rowCount()):
+            w = self.table.cellWidget(r, self.C_NAME)
+            if w is None:
+                continue
+            need = max(w.sizeHint().height(), w.minimumSizeHint().height())
+            self.table.setRowHeight(r, need + 6)
 
     def _row_of(self, marker):
         """Indice ATTUALE della riga il cui campo Nome e' ``marker`` (le righe
@@ -611,7 +642,37 @@ class CreateDialog(QDialog):
                 w.blockSignals(True)
                 w.setText(suggested[i] if i < len(suggested) else "")
                 w.blockSignals(False)
+        self._explain_quota(core.share_state(self.wallet, manual))
         self._refresh()
+
+    def _explain_quota(self, state):
+        """Dice perche' le quote automatiche sono rimaste vuote.
+
+        Senza questa riga l'utente vede delle caselle vuote (o, prima, uno
+        ``0%`` che il programma stesso poi rifiutava) e nessun motivo: il
+        calcolo era gia' corretto, mancava solo di spiegarlo.
+        """
+        if state["reason"] == core.NO_ROOM_FIXED:
+            text = _(
+                "Fra i beneficiari gia' presenti c'e' un importo fisso in "
+                "bitcoin: percentuali e importi fissi non si sommano, quindi "
+                "non posso calcolare quanto resta. Scrivi a mano la quota dei "
+                "nuovi beneficiari.")
+        elif state["reason"] == core.NO_ROOM_FULL:
+            assigned = state["existing_pct"] + state["manual_pct"]
+            text = _(
+                "Non resta quota da assegnare: fra beneficiari gia' presenti "
+                "e quote scritte a mano e' gia' impegnato il {:g}%. Riduci "
+                "prima una quota esistente (Modifica quota, nella finestra "
+                "principale), oppure scrivi a mano la quota dei nuovi."
+            ).format(round(assigned, 2))
+        else:
+            self.quota_note.setVisible(False)
+            return
+        # Lasciare la casella vuota e' voluto: si crea comunque il
+        # beneficiario, con l'importo segnaposto da correggere poi in BAL.
+        self.quota_note.setText("\u24d8  " + text)
+        self.quota_note.setVisible(True)
 
     def _name(self, i):
         w = self.table.cellWidget(i, self.C_NAME)
@@ -1378,7 +1439,9 @@ class MainDialog(QDialog):
         self.wallet = window.wallet
         self.setWindowTitle(_("Easy Heirs") + " \u2014 SAFE21")
         self.setWindowIcon(_safe21_icon())
-        self.setMinimumSize(940, 520)
+        # Con i pulsanti su due righe la larghezza non e' piu' dettata dal
+        # footer; l'altezza cresce di una riga.
+        self.setMinimumSize(660, 560)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1435,51 +1498,75 @@ class MainDialog(QDialog):
         self.empty = self._build_empty_state()
         v.addWidget(self.empty, 1)
 
-        # Footer: azione principale (verde) a sinistra, poi le secondarie,
-        # e "Stampa documenti" spinta a destra.
-        foot = QHBoxLayout()
-        foot.setSpacing(8)
+        # Footer: otto pulsanti in una griglia 4x2 a colonne uguali.
+        #
+        # In fila unica la finestra nasceva larga oltre 1100 px. Su due righe
+        # con uno spazio elastico in mezzo, pero', allargando la finestra una
+        # riga si apriva e l'altra restava ammucchiata a sinistra: il vuoto
+        # cresceva sempre nello stesso punto. Con la griglia ogni pulsante
+        # occupa una colonna della stessa larghezza, quindi restano
+        # incolonnati e crescono tutti insieme, a qualunque dimensione.
+        #
+        # Le due righe restano divise per significato:
+        #   riga 1 -> si crea qualcosa, o lo si porta fuori;
+        #   riga 2 -> azioni sul beneficiario selezionato.
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        for c in range(4):
+            grid.setColumnStretch(c, 1)
+
+        def cell(button, row, col, tip=""):
+            """Mette il pulsante nella cella, lasciandogli riempire la colonna."""
+            if tip:
+                button.setToolTip(tip)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                 QSizePolicy.Policy.Fixed)
+            grid.addWidget(button, row, col)
+
         self.b_add = _primary_button("+  " + _("Aggiungi beneficiari"))
-        self.b_add.setToolTip(_(
+        self.b_add.clicked.connect(self.on_add)
+        cell(self.b_add, 0, 0, _(
             "Genera indirizzo e seed per chi non ha un portafoglio proprio, "
             "oppure inserisci un indirizzo gia' tuo."))
-        self.b_add.clicked.connect(self.on_add)
-        foot.addWidget(self.b_add)
 
-        self.b_paper = _btc_button(_("Paper wallet") + "…")
-        self.b_paper.setToolTip(_(
-            "Crea tanti paper wallet cartacei dove inserire fondi."))
+        self.b_paper = _btc_button(_("Paper wallet") + "\u2026")
         self.b_paper.clicked.connect(self.on_paper)
-        foot.addWidget(self.b_paper)
-        b_copy = QPushButton(_("Copia indirizzo"))
-        b_copy.clicked.connect(self.on_copy)
-        foot.addWidget(b_copy)
-        b_env = QPushButton(_("Numero busta") + "\u2026")
-        b_env.clicked.connect(self.on_envelope)
-        foot.addWidget(b_env)
-        b_quota = QPushButton(_("Modifica quota") + "\u2026")
-        b_quota.setToolTip(_(
-            "Cambia la percentuale o l'importo del beneficiario selezionato "
-            "(puoi anche fare doppio clic sulla colonna Quota)."))
-        b_quota.clicked.connect(lambda: self.on_edit_quota())
-        foot.addWidget(b_quota)
-        b_del = QPushButton(_("Rimuovi") + "\u2026")
-        b_del.setToolTip(_(
-            "Togli il beneficiario selezionato dalla lista (come la \u2715 "
-            "sulla riga)."))
-        b_del.clicked.connect(lambda: self.on_delete())
-        foot.addWidget(b_del)
+        cell(self.b_paper, 0, 1, _(
+            "Crea tanti paper wallet cartacei dove inserire fondi."))
+
         b_export = QPushButton(_("Esporta lista (JSON)") + "\u2026")
-        b_export.setToolTip(_(
+        b_export.clicked.connect(self.on_export)
+        cell(b_export, 0, 2, _(
             "Salva la lista eredi in un file .json da importare in BAL con "
             "Import. Contiene solo indirizzi, quote e date: mai i seed."))
-        b_export.clicked.connect(self.on_export)
-        foot.addWidget(b_export)
-        foot.addStretch(1)
+
         b_print = QPushButton(_("Stampa documenti") + "\u2026")
         b_print.clicked.connect(self.on_print)
-        foot.addWidget(b_print)
-        v.addLayout(foot)
+        cell(b_print, 0, 3, _("Stampa i fogli dei beneficiari selezionati."))
+
+        b_copy = QPushButton(_("Copia indirizzo"))
+        b_copy.clicked.connect(self.on_copy)
+        cell(b_copy, 1, 0, _(
+            "Copia negli appunti l'indirizzo del beneficiario selezionato."))
+
+        b_env = QPushButton(_("Numero busta") + "\u2026")
+        b_env.clicked.connect(self.on_envelope)
+        cell(b_env, 1, 1, _(
+            "Assegna un numero di busta al beneficiario selezionato."))
+
+        b_quota = QPushButton(_("Modifica quota") + "\u2026")
+        b_quota.clicked.connect(lambda: self.on_edit_quota())
+        cell(b_quota, 1, 2, _(
+            "Cambia la percentuale o l'importo del beneficiario selezionato "
+            "(puoi anche fare doppio clic sulla colonna Quota)."))
+
+        b_del = QPushButton(_("Rimuovi") + "\u2026")
+        b_del.clicked.connect(lambda: self.on_delete())
+        cell(b_del, 1, 3, _(
+            "Togli il beneficiario selezionato dalla lista (come la \u2715 "
+            "sulla riga)."))
+
+        v.addLayout(grid)
 
         self.status = QLabel("")
         self.status.setStyleSheet(f"color:{MUTED}; font-size:11.5px;")
@@ -1911,13 +1998,17 @@ class AfterCreateDialog(QDialog):
         vbox.addWidget(note)
 
         row = QHBoxLayout()
-        b = QPushButton(_("Resta qui"))
+        # Un solo pulsante: chiude questa finestra e basta. Prima ce n'erano
+        # due -- "Resta qui" e "Chiudi il wallet ora" -- ma il secondo faceva
+        # una cosa che non tocca a noi (chiudere il wallet di Electrum), e
+        # avendone uno accanto all'altro sembrava una scelta importante
+        # mentre non lo era. Chiudere e riaprire il wallet resta scritto
+        # nell'avviso qui sopra: e' un consiglio, non un'azione del plugin.
+        row.addStretch(1)
+        b = _primary_button(_("Chiudi finestra"))
+        b.setDefault(True)
         b.clicked.connect(self.accept)
         row.addWidget(b)
-        row.addStretch(1)
-        c = QPushButton(_("Chiudi il wallet ora"))
-        c.clicked.connect(self._close_wallet)
-        row.addWidget(c)
         vbox.addLayout(row)
         _apply_style(self)
 
@@ -1937,20 +2028,6 @@ class AfterCreateDialog(QDialog):
                 "Non ci sono fogli da stampare per questi beneficiari."))
             return
         PrintDialog(self, self.wallet, rows).exec()
-
-    def _close_wallet(self):
-        self.accept()
-        try:
-            p = self.parent()
-            if isinstance(p, QDialog):
-                p.accept()
-        except Exception:
-            pass
-        try:
-            self.window.close()
-        except Exception:
-            pass
-
 
 # ===========================================================================
 #  Plugin
