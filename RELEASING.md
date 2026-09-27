@@ -1,69 +1,98 @@
-# Releasing Easy Heirs
+# Come si pubblica una release di Easy Heirs
 
-This is the fixed procedure for cutting a signed, verifiable release. Follow
-it every time; it always produces the same set of assets.
+Procedura fissa per produrre una release firmata e verificabile. Va seguita
+ogni volta: genera sempre lo stesso insieme di file.
 
-The signing key for this project is **SAFE21dev `<info@safe21.io>`**,
-fingerprint `33E3393DFB10F4C45AE6F1E8206C20114CA96172`
-(short key id `206C20114CA96172`). Its public key lives in the repository as
-[`SAFE21dev.asc`](SAFE21dev.asc) and is uploaded with every release.
+La chiave di firma del progetto e' **SAFE21dev `<info@safe21.io>`**, impronta
+`33E3393DFB10F4C45AE6F1E8206C20114CA96172` (identificativo breve
+`206C20114CA96172`). La chiave pubblica sta nel repository come
+[`SAFE21dev.asc`](SAFE21dev.asc) e viene allegata a ogni release.
 
-## What each release publishes
+## Cosa contiene ogni release
 
-For version `X.Y.Z`, the GitHub Release carries these assets:
+Per la versione `X.Y.Z` la pagina della release porta questi allegati:
 
-| File | What it is |
-|------|------------|
-| `bal_easy_heirs_vX.Y.Z.zip` | the plugin, loadable in Electrum |
-| `bal_easy_heirs_vX.Y.Z.zip.sha256` | SHA-256 checksum of the ZIP |
-| `bal_easy_heirs_vX.Y.Z.zip.asc` | GPG signature, armored (text) |
-| `bal_easy_heirs_vX.Y.Z.zip.sig` | GPG signature, binary |
-| `SAFE21dev.asc` | the signing public key |
+| File | Cos'e' |
+|------|--------|
+| `bal_easy_heirs_vX.Y.Z.zip` | il plugin, da caricare in Electrum |
+| `bal_easy_heirs_vX.Y.Z.zip.sha256` | impronta SHA-256 dello ZIP |
+| `bal_easy_heirs_vX.Y.Z.zip.asc` | firma GPG, leggibile (testo) |
+| `bal_easy_heirs_vX.Y.Z.zip.sig` | firma GPG, binaria |
+| `SAFE21dev.asc` | la chiave pubblica di firma |
 
-## Steps
+## Passi
 
-### 1. Bump the version (one source of truth in two files)
+### 1. Cambia il numero di versione (in tre punti)
 
-Set the same `X.Y.Z` in:
+Lo stesso `X.Y.Z` va scritto in:
 
 - `bal_easy_heirs/VERSION`
-- `bal_easy_heirs/manifest.json` (the `"version"` field)
+- `bal_easy_heirs/manifest.json` (campo `"version"`)
+- `bal_easy_heirs/core.py` (costante `RUNNING_VERSION`)
 
-Commit that change.
+Il terzo e' il numero che il codice conosce di se' mentre gira, e serve ad
+accorgersi che Electrum sta ancora usando la versione precedente. Se restasse
+indietro, il plugin darebbe quell'avviso a sproposito a ogni avvio: per
+questo `build_release.py` **rifiuta di costruire** se i tre non coincidono.
 
-### 2. Build the ZIP + checksum (reproducible)
+Fai il commit di questa modifica.
 
-From the repository root:
+### 2. Costruisci ZIP e impronta (build riproducibile)
+
+Dalla radice del repository:
 
 ```bash
 python scripts/build_release.py
 ```
 
-This writes `dist/bal_easy_heirs_vX.Y.Z.zip` and its `.sha256`. The build is
-reproducible: re-running it yields a byte-identical ZIP and the same hash, so
-anyone can rebuild and confirm the published checksum.
+Scrive `dist/bal_easy_heirs_vX.Y.Z.zip` e il suo `.sha256`. La build e'
+riproducibile: rieseguendola si ottiene uno ZIP identico byte per byte e la
+stessa impronta, quindi chiunque puo' ricostruirlo e confrontare.
 
-That holds across machines because the script normalises text files to LF
-before archiving them. Git stores LF, but a checkout on Windows with
-`core.autocrlf=true` writes CRLF to disk — without the normalisation the same
-commit would produce a different ZIP, and a different checksum, depending on
-who built it.
+Vale anche fra computer diversi perche' lo script normalizza i file di testo
+a LF prima di archiviarli. Git memorizza LF, ma una copia di lavoro su
+Windows con `core.autocrlf=true` scrive CRLF sul disco: senza quella
+normalizzazione lo stesso commit produrrebbe uno ZIP diverso, e un'impronta
+diversa, a seconda di chi lo costruisce.
 
-### 3. Sign the ZIP (release manager only)
+### 3. Fai provare lo ZIP prima di firmare
 
-Signing needs the private key and its passphrase, so it is done by hand, not
-by any script. On Windows this is easiest in **PowerShell** (Gpg4win shows
-the passphrase dialog):
+Si firma **solo cio' che e' stato provato**. Consegna lo ZIP, aspetta
+conferma che funzioni, e solo allora prosegui. Se dopo la prova cambia anche
+una riga di codice, cambia il numero di versione: due file diversi con lo
+stesso numero rendono muto il controllo della versione obsoleta, e chi
+installa il secondo crede di provarlo mentre sta usando ancora il primo.
+
+### 4. Firma lo ZIP (solo chi cura la release)
+
+Serve la chiave privata e la sua passphrase, quindi si fa a mano e non da
+script. Su Windows la firma va fatta con il gpg di **Gpg4win**, non con
+quello incluso in Git (che usa un portachiavi vuoto).
+
+In Git Bash:
 
 ```bash
-cd dist
-gpg --local-user 206C20114CA96172 --armor --detach-sign bal_easy_heirs_vX.Y.Z.zip
-gpg --local-user 206C20114CA96172 --detach-sign bal_easy_heirs_vX.Y.Z.zip
+cd "dist"
+"/c/Program Files/GnuPG/bin/gpg.exe" --local-user 206C20114CA96172 --armor --detach-sign bal_easy_heirs_vX.Y.Z.zip
+"/c/Program Files/GnuPG/bin/gpg.exe" --local-user 206C20114CA96172 --detach-sign bal_easy_heirs_vX.Y.Z.zip
 ```
 
-The first command makes the armored `.asc`, the second the binary `.sig`.
+In PowerShell la sintassi e' diversa: il percorso con gli spazi va eseguito
+con l'operatore di chiamata `&`.
 
-### 4. Verify locally before publishing
+```
+cd "dist"
+& "C:\Program Files\GnuPG\bin\gpg.exe" --local-user 206C20114CA96172 --armor --detach-sign bal_easy_heirs_vX.Y.Z.zip
+& "C:\Program Files\GnuPG\bin\gpg.exe" --local-user 206C20114CA96172 --detach-sign bal_easy_heirs_vX.Y.Z.zip
+```
+
+Attenzione a non mescolare le due sintassi: in Bash la `&` iniziale significa
+tutt'altro e il comando fallisce senza spiegare perche'.
+
+Il primo comando produce il file `.asc` (leggibile), il secondo il `.sig`
+(binario). La passphrase si digita nella finestra di Gpg4win.
+
+### 5. Verifica prima di pubblicare
 
 ```bash
 cd dist
@@ -71,32 +100,44 @@ sha256sum -c bal_easy_heirs_vX.Y.Z.zip.sha256
 gpg --verify bal_easy_heirs_vX.Y.Z.zip.asc bal_easy_heirs_vX.Y.Z.zip
 ```
 
-Expected: `bal_easy_heirs_vX.Y.Z.zip: OK` and
+Atteso: `bal_easy_heirs_vX.Y.Z.zip: OK` e
 `Good signature from "SAFE21dev <info@safe21.io>"`.
 
-### 5. Tag the commit
+### 6. Applica il tag al commit
 
 ```bash
 git tag -a vX.Y.Z -m "Easy Heirs vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-### 6. Create the GitHub Release
+### 7. Crea la pagina della release
 
-`gh` CLI is not installed, so use the web UI:
+La CLI `gh` non e' installata, quindi si usa il sito:
 
-1. Go to <https://github.com/ManX-SAFE21/EasyHeirs/releases> → **Draft a
-   new release**.
-2. Choose the tag `vX.Y.Z`.
-3. Upload the five assets from the table above (the four `dist/` files plus
-   `SAFE21dev.asc` from the repo root).
-4. Paste the verification block (see README) into the release notes.
-5. Publish.
+1. Vai su <https://github.com/ManX-SAFE21/EasyHeirs/releases> → **Draft a new
+   release**.
+2. Scegli il tag `vX.Y.Z` dal menu **"Choose a tag"**, in alto a sinistra.
+   E' un campo diverso dal titolo: scrivere il numero nel titolo non basta, e
+   la pubblicazione fallisce con *"tag name can't be blank"*. Non usare la
+   voce *"Create new tag ... on publish"*, che creerebbe un tag nuovo al posto
+   di quello gia' pubblicato e verificato.
+3. Carica i cinque allegati della tabella qui sopra (i quattro file in
+   `dist/` piu' `SAFE21dev.asc`, che sta nella radice del repository).
+4. Scrivi le note della release in italiano, con le novita' e il blocco di
+   verifica (vedi il README).
+5. Pubblica.
 
-## Notes
+### 8. Ricontrolla dal sito
 
-- `dist/` is git-ignored: release artifacts are build outputs, not source.
-  Only `SAFE21dev.asc`, `scripts/build_release.py` and this document live in
-  the repository.
-- Never commit or upload the private key. Only `SAFE21dev.asc` (public) is
-  ever shared.
+Scarica gli allegati **dalla pagina pubblicata** e rifai le verifiche del
+punto 5, importando la chiave da `SAFE21dev.asc` scaricato anch'esso dalla
+release. E' l'unico modo di controllare cio' che ricevera' davvero chi
+scarica, invece di cio' che c'e' sul proprio disco.
+
+## Note
+
+- `dist/` e' escluso da git: gli allegati sono prodotti della build, non
+  sorgenti. Nel repository stanno solo `SAFE21dev.asc`,
+  `scripts/build_release.py` e questo documento.
+- La chiave privata non va mai messa nel repository ne' caricata da nessuna
+  parte. Si condivide soltanto `SAFE21dev.asc`, che e' quella pubblica.
