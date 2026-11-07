@@ -11,7 +11,7 @@ e' stata aggiunta in seguito, per la funzione introdotta nella v0.8.0.
   generatore crittografico del sistema operativo, calcola correttamente
   entropia e checksum BIP39 e rivalida il checksum prima di restituire la
   frase. Il modulo `random` non viene mai usato per questo: sarebbe
-  prevedibile. Vedi [`core.py`](bal_easy_heirs/core.py).
+  prevedibile. Vedi [`core.py`](safe21_easy_heirs/core.py).
 - **Custodia dei seed.** `add_generated()` si rifiuta di salvare il seed di
   un beneficiario se il wallet non ha una password. Senza password il file
   del wallet di Electrum non e' cifrato, quindi il plugin blocca
@@ -54,7 +54,7 @@ richiamerebbe l'attenzione nel momento decisivo.
 
 I paper wallet sono portafogli nuovi, generati solo per essere stampati e
 alimentati in seguito. Non sono beneficiari e non hanno nulla a che vedere
-con la lista eredi di BAL; il loro modello di rischio e' diverso da quello
+con la lista dei beneficiari; il loro modello di rischio e' diverso da quello
 dei fogli qui sopra, quindi vengono esaminati a parte.
 
 - **Non viene salvato nulla, da nessuna parte.** `generate_paper_wallets()`

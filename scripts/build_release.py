@@ -16,10 +16,10 @@ Usage (from the repository root):
     python scripts/build_release.py
 
 Outputs, into ./dist :
-    bal_easy_heirs_v<VERSION>.zip
-    bal_easy_heirs_v<VERSION>.zip.sha256
+    safe21_easy_heirs_v<VERSION>.zip
+    safe21_easy_heirs_v<VERSION>.zip.sha256
 
-The version is read from bal_easy_heirs/VERSION. The GPG signatures
+The version is read from safe21_easy_heirs/VERSION. The GPG signatures
 (.asc / .sig) are produced separately by the release manager with their
 own key and passphrase; see RELEASING.md.
 """
@@ -31,7 +31,7 @@ import zipfile
 
 # Directory that holds this script -> the repository root is its parent.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PKG_DIR = os.path.join(ROOT, "bal_easy_heirs")   # the plugin package
+PKG_DIR = os.path.join(ROOT, "safe21_easy_heirs")   # the plugin package
 DIST_DIR = os.path.join(ROOT, "dist")
 
 # Fixed timestamp baked into every ZIP entry (year, month, day, h, m, s).
@@ -82,7 +82,7 @@ def collect_files() -> list:
             if name.endswith(SKIP_SUFFIXES):
                 continue
             full = os.path.join(dirpath, name)
-            # arcname keeps the leading "bal_easy_heirs/" that Electrum needs
+            # arcname keeps the leading "safe21_easy_heirs/" that Electrum needs
             arc = os.path.relpath(full, ROOT).replace(os.sep, "/")
             out.append((full, arc))
     return sorted(out, key=lambda pair: pair[1])
@@ -141,7 +141,7 @@ def main() -> None:
     version = read_version()
     check_versions_agree(version)
     os.makedirs(DIST_DIR, exist_ok=True)
-    base = f"bal_easy_heirs_v{version}.zip"
+    base = f"safe21_easy_heirs_v{version}.zip"
     zip_path = os.path.join(DIST_DIR, base)
 
     files = collect_files()

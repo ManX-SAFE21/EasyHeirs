@@ -1,0 +1,13 @@
+{
+    "name": "safe21_easy_heirs",
+    "fullname": "Easy Heirs di SAFE21",
+    "description": "Prepara i fogli di carta per i beneficiari: per chi non ha un indirizzo proprio crea indirizzo, seed BIP39 e chiave pubblica; per chi lo ha fornito produce una scheda di una pagina. Foglio A4 da piegare in tre, con banda di protezione sul retro. Crea anche paper wallet cartacei, generati offline e stampati, da alimentare versandoci dei fondi. Non legge e non modifica la lista eredi di nessun plugin: gli eredi si aggiungono poi nel plugin di eredita' leggendo il QR stampato.",
+    "icon": "safe21.png",
+    "available_for": [
+        "qt"
+    ],
+    "author": "SAFE21",
+    "license": "MIT",
+    "version": "2.0.0",
+    "min_electrum_version": "4.8.3"
+}
