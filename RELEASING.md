@@ -14,10 +14,10 @@ Per la versione `X.Y.Z` la pagina della release porta questi allegati:
 
 | File | Cos'e' |
 |------|--------|
-| `bal_easy_heirs_vX.Y.Z.zip` | il plugin, da caricare in Electrum |
-| `bal_easy_heirs_vX.Y.Z.zip.sha256` | impronta SHA-256 dello ZIP |
-| `bal_easy_heirs_vX.Y.Z.zip.asc` | firma GPG, leggibile (testo) |
-| `bal_easy_heirs_vX.Y.Z.zip.sig` | firma GPG, binaria |
+| `safe21_easy_heirs_vX.Y.Z.zip` | il plugin, da caricare in Electrum |
+| `safe21_easy_heirs_vX.Y.Z.zip.sha256` | impronta SHA-256 dello ZIP |
+| `safe21_easy_heirs_vX.Y.Z.zip.asc` | firma GPG, leggibile (testo) |
+| `safe21_easy_heirs_vX.Y.Z.zip.sig` | firma GPG, binaria |
 | `SAFE21dev.asc` | la chiave pubblica di firma |
 
 ## Passi
@@ -26,9 +26,9 @@ Per la versione `X.Y.Z` la pagina della release porta questi allegati:
 
 Lo stesso `X.Y.Z` va scritto in:
 
-- `bal_easy_heirs/VERSION`
-- `bal_easy_heirs/manifest.json` (campo `"version"`)
-- `bal_easy_heirs/core.py` (costante `RUNNING_VERSION`)
+- `safe21_easy_heirs/VERSION`
+- `safe21_easy_heirs/manifest.json` (campo `"version"`)
+- `safe21_easy_heirs/core.py` (costante `RUNNING_VERSION`)
 
 Il terzo e' il numero che il codice conosce di se' mentre gira, e serve ad
 accorgersi che Electrum sta ancora usando la versione precedente. Se restasse
@@ -45,7 +45,7 @@ Dalla radice del repository:
 python scripts/build_release.py
 ```
 
-Scrive `dist/bal_easy_heirs_vX.Y.Z.zip` e il suo `.sha256`. La build e'
+Scrive `dist/safe21_easy_heirs_vX.Y.Z.zip` e il suo `.sha256`. La build e'
 riproducibile: rieseguendola si ottiene uno ZIP identico byte per byte e la
 stessa impronta, quindi chiunque puo' ricostruirlo e confrontare.
 
@@ -73,8 +73,8 @@ In Git Bash:
 
 ```bash
 cd "dist"
-"/c/Program Files/GnuPG/bin/gpg.exe" --local-user 206C20114CA96172 --armor --detach-sign bal_easy_heirs_vX.Y.Z.zip
-"/c/Program Files/GnuPG/bin/gpg.exe" --local-user 206C20114CA96172 --detach-sign bal_easy_heirs_vX.Y.Z.zip
+"/c/Program Files/GnuPG/bin/gpg.exe" --local-user 206C20114CA96172 --armor --detach-sign safe21_easy_heirs_vX.Y.Z.zip
+"/c/Program Files/GnuPG/bin/gpg.exe" --local-user 206C20114CA96172 --detach-sign safe21_easy_heirs_vX.Y.Z.zip
 ```
 
 In PowerShell la sintassi e' diversa: il percorso con gli spazi va eseguito
@@ -82,8 +82,8 @@ con l'operatore di chiamata `&`.
 
 ```
 cd "dist"
-& "C:\Program Files\GnuPG\bin\gpg.exe" --local-user 206C20114CA96172 --armor --detach-sign bal_easy_heirs_vX.Y.Z.zip
-& "C:\Program Files\GnuPG\bin\gpg.exe" --local-user 206C20114CA96172 --detach-sign bal_easy_heirs_vX.Y.Z.zip
+& "C:\Program Files\GnuPG\bin\gpg.exe" --local-user 206C20114CA96172 --armor --detach-sign safe21_easy_heirs_vX.Y.Z.zip
+& "C:\Program Files\GnuPG\bin\gpg.exe" --local-user 206C20114CA96172 --detach-sign safe21_easy_heirs_vX.Y.Z.zip
 ```
 
 Attenzione a non mescolare le due sintassi: in Bash la `&` iniziale significa
@@ -96,11 +96,11 @@ Il primo comando produce il file `.asc` (leggibile), il secondo il `.sig`
 
 ```bash
 cd dist
-sha256sum -c bal_easy_heirs_vX.Y.Z.zip.sha256
-gpg --verify bal_easy_heirs_vX.Y.Z.zip.asc bal_easy_heirs_vX.Y.Z.zip
+sha256sum -c safe21_easy_heirs_vX.Y.Z.zip.sha256
+gpg --verify safe21_easy_heirs_vX.Y.Z.zip.asc safe21_easy_heirs_vX.Y.Z.zip
 ```
 
-Atteso: `bal_easy_heirs_vX.Y.Z.zip: OK` e
+Atteso: `safe21_easy_heirs_vX.Y.Z.zip: OK` e
 `Good signature from "SAFE21dev <info@safe21.io>"`.
 
 ### 6. Applica il tag al commit

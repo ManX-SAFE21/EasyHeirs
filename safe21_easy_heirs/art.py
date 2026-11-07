@@ -1,15 +1,15 @@
 """Piccoli disegni per la fascia d'intestazione delle finestre.
 
 Sono SVG scritti a mano e tenuti qui come stringhe, non come file: pesano
-poche righe e cosi' restano accanto al codice che li usa, senza aggiungere
+poche righe e così restano accanto al codice che li usa, senza aggiungere
 risorse da imballare nello ZIP.
 
-Perche' SVG e non QSvgWidget: la build ufficiale di Electrum NON contiene
-QtSvg (manca ``QtSvg.pyd``), quindi quella strada e' preclusa. Contiene pero'
+Perché SVG e non QSvgWidget: la build ufficiale di Electrum NON contiene
+QtSvg (manca ``QtSvg.pyd``), quindi quella strada è preclusa. Contiene però
 il lettore d'immagini ``qsvg``, per cui Qt sa aprire un SVG come una
-qualsiasi immagine: e' la via che usiamo. Per quel lettore restiamo su SVG
+qualsiasi immagine: è la via che usiamo. Per quel lettore restiamo su SVG
 1.1 elementare -- tracciati, rettangoli, cerchi, attributi di presentazione --
-senza fogli di stile o filtri, che non e' detto interpreti.
+senza fogli di stile o filtri, che non è detto interpreti.
 
 Se per qualunque motivo il disegno non si carica, ``band_pixmap`` restituisce
 None e la fascia resta come prima: un'illustrazione decorativa non deve mai
@@ -20,7 +20,7 @@ from electrum.logging import get_logger
 
 _logger = get_logger(__name__)
 
-# Proporzioni del riquadro: largo poco piu' del triplo dell'altezza, per
+# Proporzioni del riquadro: largo poco più del triplo dell'altezza, per
 # riempire lo spazio libero a destra del titolo senza toccare i bordi.
 ART_W, ART_H = 124, 40
 
@@ -62,7 +62,7 @@ _BODIES = {
   </g>''',
 
     # Una stampante e i fogli A4 in verticale, con le due pieghe orizzontali:
-    # e' il formato che produciamo davvero (A4 ritratto piegato in tre).
+    # è il formato che produciamo davvero (A4 ritratto piegato in tre).
     "print": f'''
   <g fill="none" stroke="{_TEAL}" stroke-width="1.6" stroke-linecap="round"
      stroke-linejoin="round">
@@ -140,14 +140,14 @@ def band_pixmap(name, height=ART_H, ratio=1.0):
 
     Il lettore SVG di Qt disegna alla misura scritta nell'attributo
     ``width``/``height``, non a quella della QLabel: per gli schermi ad alta
-    densita' lo generiamo quindi gia' ingrandito di ``ratio`` e poi diciamo
-    alla pixmap di che fattore si tratta, cosi' resta nitido senza occupare
-    piu' spazio nel layout.
+    densità lo generiamo quindi già ingrandito di ``ratio`` e poi diciamo
+    alla pixmap di che fattore si tratta, così resta nitido senza occupare
+    più spazio nel layout.
     """
     if name not in _BODIES:
         return None
-    # Import locale: cosi' questo modulo resta importabile (e collaudabile)
-    # anche dove non c'e' una GUI.
+    # Import locale: così questo modulo resta importabile (e collaudabile)
+    # anche dove non c'è una GUI.
     from PyQt6.QtGui import QPixmap
     ratio = max(1.0, float(ratio or 1.0))
     h = int(round(height * ratio))
@@ -159,7 +159,7 @@ def band_pixmap(name, height=ART_H, ratio=1.0):
         _logger.info(f"disegno {name} non caricato: {e}")
         return None
     if not loaded or pm.isNull():
-        # Succede se manca il lettore SVG: non e' un errore da mostrare.
+        # Succede se manca il lettore SVG: non è un errore da mostrare.
         _logger.info(f"disegno {name} non disponibile (lettore SVG assente?)")
         return None
     pm.setDevicePixelRatio(ratio)
