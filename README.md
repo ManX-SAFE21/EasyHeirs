@@ -45,7 +45,7 @@ non deve credere a nessuno sulla parola. Il quadro completo dei rischi e' in
 
 ## Requisiti
 
-- Electrum Wallet **4.8.3 o successivo**. Su versioni più vecchie il plugin non si attiva e lo dice con un messaggio: è stato provato solo da Electrum 4.8.3 in poi.
+- Electrum Wallet **4.8.3 o successivo**. Su versioni più vecchie il plugin non si attiva e lo dice con un messaggio: è stato provato solo da Electrum 4.8.3 in poi, fino alla 4.8.4.
 
 ## Installazione
 
